@@ -17,7 +17,7 @@ A Premier League fixture dashboard using TypeSafe AI's Jev through Vercel AI Gat
 npm install
 vercel link      # first time only, links this directory to a Vercel project
 vercel env pull .env.local
-npm run dev       # runs `vercel dev`, which also emulates the api/ functions
+vercel dev        # do not wrap this in an npm script — `vercel dev` detects and refuses that recursion
 ```
 
 `vercel dev` needs `AI_GATEWAY_API_KEY` and `BLOB_READ_WRITE_TOKEN` in `.env.local` (pulled from the linked project once a Blob store is attached — see Deploy below). Without a Blob store, `/api/fixtures` returns a 503 until you trigger the cron routes once by hand:
