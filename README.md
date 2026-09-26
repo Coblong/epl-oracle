@@ -1,4 +1,4 @@
-# EPL Oracle
+# The EPL Oracle
 
 A Premier League fixture dashboard using TypeSafe AI's Jev through Vercel AI Gateway. Deploys to Vercel as a static frontend plus a handful of serverless functions — no server process, no database to run yourself.
 

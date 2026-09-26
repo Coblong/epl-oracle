@@ -19,6 +19,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error(e);
-    return json(res, 502, {error: 'Unable to load Jev’s track record. Please try again.'});
+    return json(res, 502, {error: 'Unable to load the track record. Please try again.'});
   }
 }
