@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {"path": "/api/cron/fixtures", "schedule": "30 5 * * *"},
+    {"path": "/api/cron/predictions", "schedule": "0 6 * * *"}
+  ],
+  "functions": {
+    "api/cron/fixtures.mjs": {"maxDuration": 60},
+    "api/cron/predictions.mjs": {"maxDuration": 300}
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {"key": "X-Content-Type-Options", "value": "nosniff"},
+        {"key": "Referrer-Policy", "value": "no-referrer"},
+        {"key": "Content-Security-Policy", "value": "default-src 'self'; img-src 'self' https://resources.premierleague.com; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"}
+      ]
+    }
+  ]
+}
