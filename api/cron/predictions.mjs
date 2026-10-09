@@ -2,6 +2,7 @@ import {getStore} from '../../lib/store.mjs';
 import {predictFixtures} from '../../lib/prediction-job.mjs';
 import {authorizeCron} from '../../lib/cron-auth.mjs';
 import {predictMatch} from '../../lib/jev.mjs';
+import {predictDecision} from '../../lib/decisions.mjs';
 
 const json = (res, status, data) => {
   res.statusCode = status;
@@ -11,7 +12,11 @@ const json = (res, status, data) => {
 
 export default async function handler(req, res) {
   if (!authorizeCron(req)) return json(res, 401, {error: 'Unauthorized'});
-  if (!process.env.AI_GATEWAY_API_KEY) return json(res, 200, {ok: true, skipped: 'AI_GATEWAY_API_KEY is not configured.'});
+  const providers = {};
+  if (process.env.AI_GATEWAY_API_KEY) providers.jev = predictMatch;
+  if (process.env.OPENAI_API_KEY) providers.openai = predictDecision;
+  if (!Object.keys(providers).length) return json(res, 200, {ok:true, skipped:'No prediction providers are configured.'});
+  if (providers.openai && process.env.PERSISTENCE_BACKEND !== 'neon') return json(res, 409, {error:'Dual-provider predictions require validated Neon persistence.'});
   try {
     const store = getStore();
     const fixtures = await store.getFixtures();
@@ -23,7 +28,7 @@ export default async function handler(req, res) {
     const targets = upcoming.filter(m => m.gameweek === nextGameweek);
 
     // Keep daily changed-evidence Jev behaviour until the weekly-run issue.
-    const {updated, failed} = await predictFixtures(store, targets, predictMatch);
+    const {updated, failed} = await predictFixtures(store, targets, providers);
 
     return json(res, 200, {ok: true, gameweek: nextGameweek ?? null, targeted: targets.length, updated, failed});
   } catch (e) {

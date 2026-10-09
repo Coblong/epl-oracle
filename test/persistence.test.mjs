@@ -74,6 +74,41 @@ dbtest('repeating an import is idempotent and changed snapshots cannot overwrite
   assert.deepEqual((await store.getPredictions())[11].prediction.score,[2,1]);
 });
 
+dbtest('both providers use immutable shared evidence and retain independent successful revisions',async()=>{
+  const source=baseline();source.predictions={};await store.importSnapshot(source);
+  const seen=[];
+  const providers={jev:async input=>{seen.push(structuredClone(input));input.home.name='Mutated';return prediction;},
+    openai:async input=>{seen.push(structuredClone(input));return {...prediction,model:'gpt-6-luna',outcome:'away',score:[1,0]};}};
+  assert.deepEqual(await predictFixtures(store,[match],providers,async()=>{}),{updated:2,failed:0});
+  assert.deepEqual(seen,[match,match]);
+  const row=(await pool.query(`SELECT id FROM "${schema}".runs WHERE run_key LIKE 'forecast:%'`)).rows[0];
+  const run=await store.getRun(row.id);assert.deepEqual(run.snapshots[0].input,match);assert.equal(run.predictions.length,2);
+  assert.ok(run.attempts.every(a=>a.status==='succeeded'));
+  let live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.predictions.jev.model,'typesafe-ai/jev');assert.equal(live.predictions.openai.model,'gpt-6-luna');
+  assert.equal(live.predictions.openai.outcome,'away');assert.deepEqual(live.predictions.openai.score,[1,0]);
+  const next={...match,kickoff:'2099-10-13T12:00:00Z'};
+  await store.refreshFixtures({matches:[next],raw:[],teams,source:source.fixtures.source,updatedAt:'2026-10-02T08:00:00Z'});
+  const newer={...prediction,score:[3,2],generatedAt:'2026-10-02T09:00:00Z'};
+  assert.deepEqual(await predictFixtures(store,[next],{jev:async()=>newer,openai:async()=>{throw new Error('refused');}},async()=>{}),{updated:1,failed:1});
+  live=(await response(fixturesHandler)).matches[0];
+  assert.deepEqual(live.predictions.jev.score,[3,2]);assert.equal(live.predictions.jev.stale,false);
+  assert.deepEqual(live.predictions.openai.score,[1,0]);assert.equal(live.predictions.openai.stale,true);
+  assert.equal((await store.getRun(row.id)).predictions.length,2);
+  assert.equal((await pool.query(`SELECT count(*)::int AS count FROM "${schema}".predictions WHERE fixture_id=11`)).rows[0].count,3);
+});
+
+dbtest('Jev failure still saves OpenAI immediately and absent opinions stay absent',async()=>{
+  const source=baseline();source.predictions={};await store.importSnapshot(source);
+  const stats=await predictFixtures(store,[match],{jev:async()=>{throw new Error('network failure');},openai:async()=>({...prediction,model:'gpt-6-luna'})},async()=>{});
+  assert.deepEqual(stats,{updated:1,failed:1});
+  const live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.predictions.jev,undefined);assert.equal(live.predictions.openai.model,'gpt-6-luna');
+  let calls=0;
+  await predictFixtures(store,[match],{openai:async()=>{calls++;return prediction;}},async()=>{});
+  assert.equal(calls,0);
+});
+
 dbtest('a fixture returning to earlier evidence receives a visible new revision and then skips unchanged runs',async()=>{
   const source=baseline();source.predictions={};
   await store.importSnapshot(source);

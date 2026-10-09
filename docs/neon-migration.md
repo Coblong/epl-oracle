@@ -43,6 +43,8 @@ Before Neon receives new writes, rollback means setting `PERSISTENCE_BACKEND=blo
 
 After Neon receives writes, the original Blob files are a point-in-time backup. Simply switching back would discard newer forecasts and results from the displayed application. To preserve current records:
 
+The compatible Blob export contains Jev forecasts only. Once dual predictions are enabled, OpenAI forecasts, shared run evidence and attempt history remain in Neon and cannot be represented in the legacy Blob format. Keep Neon available throughout any rollback; switching to Blob hides the OpenAI opinions. The compatible export is not a full database backup.
+
 1. Pause jobs and wait for in-flight invocations to finish.
 2. Preserve the original Blob baseline and export Neon's current compatible fixture/prediction/results view:
 
