@@ -1,4 +1,5 @@
 {
+  "regions": ["lhr1"],
   "crons": [
     {"path": "/api/cron/fixtures", "schedule": "30 5 * * *"},
     {"path": "/api/cron/predictions", "schedule": "0 6 * * *"}
