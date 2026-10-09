@@ -1,4 +1,12 @@
 const escape = value => String(value).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export function forecastNotice(providers) {
+  const enabled = ['jev','openai'].filter(provider=>providers[provider]);
+  if (!enabled.length) return {text:'Official fixtures · Forecasts are currently unavailable.', error:true};
+  const names = enabled.map(provider=>provider==='jev'?'Jev':'OpenAI Decisions').join(' and ');
+  const unavailable = enabled.length === 1 ? ` ${enabled[0]==='jev'?'OpenAI Decisions':'Jev'} is currently unavailable.` : '';
+  return {text:`Official fixtures · ${names} forecasts for the next gameweek update automatically each day.${unavailable}`, error:false};
+}
+
 export function forecastPanel(match, provider, prediction) {
   const label = provider === 'jev' ? 'Jev' : 'OpenAI Decisions';
   const heading = `<div class="prediction-heading"><strong>${label}</strong></div>`;

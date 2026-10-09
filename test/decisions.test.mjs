@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {decisionsRequest,parseDecision,predictDecision} from '../lib/decisions.mjs';
 import {predictionEvidence,predictionQuestions} from '../lib/football.mjs';
-import {forecastPanel} from '../forecast-view.mjs';
+import {forecastPanel,forecastNotice} from '../forecast-view.mjs';
 
 const match={id:55,home:{name:'Home',short:'HOM'},away:{name:'Away',short:'AWY'}};
 const response=()=>({model:'gpt-6-luna',answers:Object.entries(predictionQuestions()).map(([name,q])=>({name,type:'choice',choice:name==='outcome'?'away':'1_0',probabilities:Object.keys(q.criteria).map(value=>({value,probability:value===(name==='outcome'?'away':'1_0')?1:0}))}))});
@@ -51,4 +51,14 @@ test('forecast panels expose separate outcomes, scores, timestamps and missing o
   assert.match(html,/OpenAI Decisions/);assert.match(html,/Away win/);assert.match(html,/1 : 0/);
   assert.match(html,/2026-10-09T09:00:00Z/);assert.match(html,/earlier fixture information/);
   assert.ok(!html.includes('<script>'));assert.match(forecastPanel(match,'jev',null),/No prediction available/);
+});
+
+test('forecast notice only claims automatic updates for enabled providers',()=>{
+  const none=forecastNotice({jev:false,openai:false});
+  assert.equal(none.error,true);assert.ok(!none.text.includes('automatically'));
+  assert.match(forecastNotice({jev:true,openai:false}).text,/Jev forecasts/);
+  assert.match(forecastNotice({jev:true,openai:false}).text,/OpenAI Decisions is currently unavailable/);
+  assert.match(forecastNotice({jev:false,openai:true}).text,/OpenAI Decisions forecasts/);
+  assert.match(forecastNotice({jev:false,openai:true}).text,/Jev is currently unavailable/);
+  assert.match(forecastNotice({jev:true,openai:true}).text,/Jev and OpenAI Decisions forecasts/);
 });
