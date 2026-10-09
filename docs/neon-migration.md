@@ -19,7 +19,7 @@ The commands below load `.env.local`. Use that file only for the environment bei
    node --env-file=.env.local scripts/persistence.mjs export-blob --output .migration/blob-baseline.json
    ```
 
-   The export reads origin data without CDN caching and requires two identical passes. Missing fixture documents, invalid forecasts, duplicate IDs, orphaned predictions or incorrect result flags fail validation.
+   The export uses the authenticated Blob metadata and copy APIs to copy each current document to a unique temporary URL, with the source ETag as a copy precondition. It checks the downloaded copy's ETag and the source ETag after reading, then deletes the temporary copy. Public reads of the original URLs can be stale, even with `useCache:false`, so they are never used as migration evidence. The export still requires two identical passes. Missing fixture documents, invalid forecasts, duplicate IDs, orphaned predictions or incorrect result flags fail validation. Temporary copies contain the same public data as the source documents. A failed cleanup aborts the command; remove any remaining `migration-snapshots/` copies before retrying.
 
 4. Review the dry-run report, initialize the database, and import the snapshot:
 
@@ -57,7 +57,7 @@ After Neon receives writes, the original Blob files are a point-in-time backup. 
    node --env-file=.env.local scripts/persistence.mjs restore-blob --input .migration/neon-rollback.json --apply
    ```
 
-   Blob restoration writes three documents and is not transactional. If restoration or its verification fails, keep jobs paused and repeat restoration from the saved snapshot before switching. Neon retains the complete revision/run/attempt history; the old Blob format can only represent active forecasts and completed results.
+   Blob restoration writes three documents and is not transactional. Verification uses the same temporary-copy reader as export, so cached public data cannot make an old snapshot appear restored. If restoration or its verification fails, keep jobs paused and repeat restoration from the saved snapshot before switching. Allow the original public URLs' existing cache lifetime to expire before resuming Blob-backed traffic, or continue serving Neon until then. Neon retains the complete revision/run/attempt history; the old Blob format can only represent active forecasts and completed results.
 
 4. Set `PERSISTENCE_BACKEND=blob`, redeploy, verify the API/UI totals, then resume jobs. Keep the Neon database and both snapshots available for investigation.
 

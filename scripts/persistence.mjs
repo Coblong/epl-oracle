@@ -1,6 +1,7 @@
 import {readFile, writeFile} from 'node:fs/promises';
 import {captureSnapshot, inspectSnapshot, fingerprint} from '../lib/migration.mjs';
-import {readJSON, writeJSON} from '../lib/blob-store.mjs';
+import {writeJSON} from '../lib/blob-store.mjs';
+import {createMigrationReader} from '../lib/blob-migration.mjs';
 import {databasePool, closeDatabase} from '../lib/store.mjs';
 import {createPostgresStore} from '../lib/postgres-store.mjs';
 
@@ -23,7 +24,7 @@ function normalize(snapshot) {
 
 try {
   if (command === 'export-blob') {
-    const snapshot = await captureSnapshot(readJSON);
+    const snapshot = await captureSnapshot(createMigrationReader());
     await save(value('--output'), snapshot);
     console.log(JSON.stringify({saved:true, ...inspectSnapshot(snapshot)}, null, 2));
   } else if (command === 'restore-blob') {
@@ -35,7 +36,7 @@ try {
       await writeJSON('data/fixtures.json', snapshot.fixtures);
       await writeJSON('data/predictions.json', snapshot.predictions);
       await writeJSON('data/results.json', snapshot.results);
-      if (fingerprint(normalize(await captureSnapshot(readJSON))) !== fingerprint(normalize(snapshot))) throw new Error('Blob restoration verification failed. Keep jobs paused and retry restoration.');
+      if (fingerprint(normalize(await captureSnapshot(createMigrationReader()))) !== fingerprint(normalize(snapshot))) throw new Error('Blob restoration verification failed. Keep jobs paused and retry restoration.');
       console.log(JSON.stringify({restored:true, ...inspectSnapshot(snapshot)}, null, 2));
     }
   } else if (['setup','import','verify','export-neon'].includes(command)) {
