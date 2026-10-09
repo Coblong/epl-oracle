@@ -6,6 +6,7 @@ import {createPostgresStore} from '../lib/postgres-store.mjs';
 import {closeDatabase} from '../lib/store.mjs';
 import fixturesHandler from '../api/fixtures.mjs';
 import resultsHandler from '../api/results.mjs';
+import {predictFixtures} from '../lib/prediction-job.mjs';
 
 const enabled=!!process.env.TEST_DATABASE_URL;
 const schema='epl_oracle_test_'+randomUUID().replaceAll('-','');
@@ -71,6 +72,26 @@ dbtest('repeating an import is idempotent and changed snapshots cannot overwrite
   const changed=baseline();changed.predictions[11].prediction.score=[3,1];
   await assert.rejects(store.importSnapshot(changed),/different snapshot/);
   assert.deepEqual((await store.getPredictions())[11].prediction.score,[2,1]);
+});
+
+dbtest('a fixture returning to earlier evidence receives a visible new revision and then skips unchanged runs',async()=>{
+  const source=baseline();source.predictions={};
+  await store.importSnapshot(source);
+  const states=[match,{...match,kickoff:'2099-10-14T12:00:00Z'},match];
+  let calls=0;
+  for (const [index,state] of states.entries()) {
+    await store.refreshFixtures({matches:[state],raw:[],teams,source:source.fixtures.source,updatedAt:`2026-10-0${index+2}T08:00:00Z`});
+    const stats=await predictFixtures(store,(await store.getFixtures()).matches,async()=>{
+      calls++;
+      return {...prediction,score:[calls,0],generatedAt:`2026-10-0${index+2}T09:00:00Z`};
+    },async()=>{});
+    assert.deepEqual(stats,{updated:1,failed:0});
+    assert.deepEqual((await response(fixturesHandler)).matches[0].prediction.score,[index+1,0]);
+  }
+  assert.equal((await pool.query(`SELECT count(*)::int AS count FROM "${schema}".predictions WHERE fixture_id=11`)).rows[0].count,3);
+  const repeated=await predictFixtures(store,(await store.getFixtures()).matches,async()=>{throw new Error('Unchanged evidence should not call provider');},async()=>{});
+  assert.deepEqual(repeated,{updated:0,failed:0});
+  assert.equal(calls,3);
 });
 dbtest('invalid source data or failed database inserts leave no partial import or readiness marker',async()=>{
   const invalid=baseline();invalid.results[0].correctScore=false;
