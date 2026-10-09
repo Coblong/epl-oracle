@@ -1,4 +1,4 @@
-import {readJSON} from '../lib/store.mjs';
+import {getStore} from '../lib/store.mjs';
 import {accuracySummary} from '../lib/football.mjs';
 
 const json = (res, status, data) => {
@@ -11,7 +11,7 @@ const json = (res, status, data) => {
 export default async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, {error: 'Method not allowed'});
   try {
-    const results = (await readJSON('data/results.json')) || [];
+    const results = await getStore().getResults();
     const sorted = [...results].sort((a, b) => Date.parse(b.kickoff) - Date.parse(a.kickoff));
     return json(res, 200, {
       results: sorted.slice(0, 20),
