@@ -35,7 +35,7 @@ Run `npm test` for fixture, prediction, accuracy and migration-source tests. Set
 2. Add a **Blob** store to the project (Storage tab) — this sets `BLOB_READ_WRITE_TOKEN` automatically for all environments.
 3. Set `AI_GATEWAY_API_KEY` and `OPENAI_API_KEY` as server-only credentials. For Neon, also set the pooled `DATABASE_URL` and complete [migration validation](docs/neon-migration.md) before setting `PERSISTENCE_BACKEND=neon`. Keep the Blob token for migration and rollback.
 4. Optionally set `CRON_SECRET` — Vercel then sends it back as a Bearer token on every Cron Jobs request, and `/api/cron/*` verifies it before doing anything.
-5. Deploy on a Vercel plan that supports hourly Cron Jobs. `vercel.json` registers daily fixture refresh and UTC prediction invocations for the Wednesday run and Thursday recovery period. Before data is loaded, the fixtures endpoint reports "not loaded yet". Neon requires an initialized schema and verified import before serving data.
+5. Deploy. `vercel.json` registers daily fixture refresh and separate once-daily UTC prediction entries for Wednesday's start and Thursday's recovery period. The London-time guard covers both GMT and BST; Vercel Hobby may invoke within the scheduled UTC hour. Before data is loaded, the fixtures endpoint reports "not loaded yet". Neon requires an initialized schema and verified import before serving data.
 
 ## Behaviour
 
