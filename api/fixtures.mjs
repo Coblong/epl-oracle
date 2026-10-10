@@ -1,5 +1,7 @@
 import {getStore} from '../lib/store.mjs';
 import {fingerprint} from '../lib/migration.mjs';
+import {expectedWeeklyRunKey} from '../lib/weekly-predictions.mjs';
+import {forecastAvailability} from '../forecast-view.mjs';
 
 const json = (res, status, data) => {
   res.statusCode = status;
@@ -14,6 +16,7 @@ export default async function handler(req, res) {
     const {fixtures, predictions, providerPredictions, forecastAttempts} = await getStore().getFixtureView();
     if (!fixtures) return json(res, 503, {error: 'Fixtures have not been loaded yet. Please check back shortly.', configured: !!process.env.AI_GATEWAY_API_KEY});
     const now = Date.now();
+    const expectedRunKey = expectedWeeklyRunKey(now);
     const matches = fixtures.matches
       .filter(m => !m.kickoff || Date.parse(m.kickoff) > now)
       .map(m => {
@@ -32,8 +35,7 @@ export default async function handler(req, res) {
         for (const provider of ['jev','openai']) {
           const attempt = forecastAttempts?.[m.id]?.[provider];
           const forecast = providerPredictions?.[m.id]?.[provider];
-          forecastStates[provider] = {...attempt, availability: !forecasts[provider] ? 'missing'
-            : forecasts[provider].stale || attempt && attempt.runId !== forecast?.runId ? 'retained' : 'fresh'};
+          forecastStates[provider] = {...attempt, availability: forecastAvailability(forecast,attempt,expectedRunKey,forecasts[provider] ? forecasts[provider].stale : false)};
         }
         return {...m, ...(matches ? {prediction:entry.prediction} : {}), predictions:forecasts, forecastStates};
       });

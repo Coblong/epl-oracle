@@ -269,6 +269,24 @@ dbtest('a stale fixture refresh or prediction cannot overwrite newer evidence',a
   assert.equal((await response(fixturesHandler)).matches[0].prediction,undefined);
 });
 
+dbtest('an overdue forecast is retained when stale fixture data prevents a new weekly snapshot',async t=>{
+  const source=baseline();source.predictions={};source.fixtures.updatedAt='2099-10-05T08:00:00Z';
+  await store.importSnapshot(source);
+  const previous=await store.beginRun('weekly:2099-09-30T08:00:00.000Z','2099-09-30T08:00:00Z');
+  await store.saveSnapshot(previous.id,match.id,match);
+  await store.savePrediction({runId:previous.id,fixtureId:match.id,provider:'jev',matchSignature:JSON.stringify(match),prediction,completedAt:'2099-09-30T08:15:00Z'});
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-07T08:00:00Z')});
+  try {
+    const stats=await generateWeeklyPredictions(store,{jev:async()=>{throw new Error('must not run without fresh fixture data');}},'2099-10-07T08:00:00Z',async()=>{});
+    assert.deepEqual(stats,{targeted:1,updated:0,failed:0});
+    const live=(await response(fixturesHandler)).matches[0];
+    assert.equal(live.forecastStates.jev.status,'succeeded');
+    assert.equal(live.forecastStates.jev.availability,'retained');
+    const view=await store.getFixtureView();
+    assert.equal(view.providerPredictions[match.id].jev.runKey,'weekly:2099-09-30T08:00:00.000Z');
+  } finally {t.mock.timers.reset();}
+});
+
 dbtest('a failed fixture refresh rolls back result resolution and fixture changes together',async()=>{
   await store.importSnapshot(baseline());
   await assert.rejects(store.refreshFixtures({matches:[{...match,id:2147483648}],raw:[{id:11,event:2,team_h:1,team_a:2,kickoff_time:match.kickoff,finished:true,team_h_score:3,team_a_score:1}],teams,source:'Official Fantasy Premier League',updatedAt:'2026-10-03T08:00:00Z'}),/out of range/);
@@ -301,7 +319,7 @@ dbtest('visitors see retained and missing forecasts after a failed provider refr
   assert.equal(live.predictions.jev.generatedAt,prediction.generatedAt);
   assert.equal(live.predictions.openai,undefined);
   assert.match(forecastPanel(live,'jev',live.predictions.jev,live.forecastStates.jev),/Refresh failed.*Retaining the earlier forecast/);
-  assert.match(forecastPanel(live,'openai',null,live.forecastStates.openai),/No prediction available.*Refresh failed/s);
+  assert.equal(forecastPanel(live,'openai',null,live.forecastStates.openai),'');
   assert.ok(!JSON.stringify(live).includes('private credential'));
 });
 
@@ -362,7 +380,7 @@ dbtest('the Thursday cutoff is visible without a write and the next cron persist
   t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-08T08:00:00Z')});
   const live=(await response(fixturesHandler)).matches[0];
   assert.equal(live.forecastStates.openai.status,'expired');
-  assert.match(forecastPanel(live,'openai',null,live.forecastStates.openai),/Retry window expired/);
+  assert.equal(forecastPanel(live,'openai',null,live.forecastStates.openai),'');
   assert.equal((await store.getRun(run.id)).attempts[0].status,'failed');
   let calls=0;
   const stats=await generateWeeklyPredictions(store,{openai:async()=>{calls++;}},'2099-10-08T08:00:00Z',async()=>{});
@@ -371,11 +389,12 @@ dbtest('the Thursday cutoff is visible without a write and the next cron persist
   assert.equal((await store.getRun(run.id)).attempts[0].status,'expired');
 });
 
-dbtest('partial weekly success is visible immediately and only the failed provider retries to a fresh forecast',async()=>{
+dbtest('partial weekly success is visible immediately and only the failed provider retries to a fresh forecast',async t=>{
   const source=baseline();source.predictions={};
   source.fixtures.updatedAt='2099-10-07T08:00:00Z';
   source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
   await store.importSnapshot(source);
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-07T08:00:00Z')});
   let release,started;
   const waiting=new Promise(resolve=>{release=resolve;}),openaiStarted=new Promise(resolve=>{started=resolve;});
   const seen=[];
@@ -392,7 +411,7 @@ dbtest('partial weekly success is visible immediately and only the failed provid
   } finally {release();await job;}
   live=(await response(fixturesHandler)).matches[0];
   assert.equal(live.forecastStates.openai.status,'failed');
-  assert.match(forecastPanel(live,'openai',null,live.forecastStates.openai),/Refresh failed/);
+  assert.equal(forecastPanel(live,'openai',null,live.forecastStates.openai),'');
   let successfulProviderCalls=0;
   const retry=await generateWeeklyPredictions(store,{jev:async()=>{successfulProviderCalls++;return prediction;},
     openai:async input=>{seen.push(structuredClone(input));return {...prediction,model:'gpt-6-luna',generatedAt:'2099-10-07T08:15:00Z'};}},'2099-10-07T08:15:00Z',async()=>{});
@@ -403,6 +422,7 @@ dbtest('partial weekly success is visible immediately and only the failed provid
   assert.equal(live.forecastStates.openai.status,'succeeded');
   assert.equal(live.forecastStates.openai.availability,'fresh');
   assert.equal(live.forecastStates.openai.attemptCount,2);
+  t.mock.timers.reset();
   assert.match(forecastPanel(live,'openai',live.predictions.openai,live.forecastStates.openai),/2099-10-07T08:15:00Z/);
   assert.ok(!forecastPanel(live,'openai',live.predictions.openai,live.forecastStates.openai).includes('Refresh failed'));
 });

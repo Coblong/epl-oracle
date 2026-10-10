@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {eligibleWeeklyFixtures, generateWeeklyPredictions, weeklyRunContext} from '../lib/weekly-predictions.mjs';
+import {eligibleWeeklyFixtures, expectedWeeklyRunKey, generateWeeklyPredictions, weeklyRunContext} from '../lib/weekly-predictions.mjs';
 
 test('weekly run starts at 09:00 London in winter and summer and expires at Thursday 09:00', () => {
   assert.equal(weeklyRunContext('2026-01-07T08:59:59Z'), null);
@@ -14,6 +14,13 @@ test('weekly run starts at 09:00 London in winter and summer and expires at Thur
   assert.equal(summer.scheduledAt.toISOString(), '2026-07-08T08:00:00.000Z');
   assert.equal(weeklyRunContext('2026-07-09T07:59:59Z').key, summer.key);
   assert.equal(weeklyRunContext('2026-07-09T08:00:00Z'), null);
+});
+
+test('forecast freshness follows the latest scheduled run outside its recovery window', () => {
+  assert.equal(expectedWeeklyRunKey('2026-10-06T08:00:00Z'),'weekly:2026-09-30T08:00:00.000Z');
+  assert.equal(expectedWeeklyRunKey('2026-10-07T07:59:59Z'),'weekly:2026-09-30T08:00:00.000Z');
+  assert.equal(expectedWeeklyRunKey('2026-10-08T08:00:00Z'),'weekly:2026-10-07T08:00:00.000Z');
+  assert.equal(expectedWeeklyRunKey('2026-10-09T08:00:00Z'),'weekly:2026-10-07T08:00:00.000Z');
 });
 
 test('weekly fixture selection uses the scheduled ten-day half-open interval and excludes undated or started fixtures', () => {
