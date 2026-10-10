@@ -244,8 +244,9 @@ dbtest('provider claims serialize overlaps, retry failures once, and never recla
 });
 dbtest('daily refresh resolves a final score once and does not revive it with a late prediction',async()=>{
   await store.importSnapshot(baseline());
-  const late=await save();
-  const refresh={matches:[],raw:[{id:11,event:2,team_h:1,team_a:2,kickoff_time:match.kickoff,finished:true,team_h_score:3,team_a_score:1}],teams,source:'Official Fantasy Premier League',updatedAt:'2026-10-03T08:00:00Z'};
+  const completedFixture={...match,kickoff:'2026-10-02T07:00:00Z'};
+  const late=await save(completedFixture,{...prediction,generatedAt:'2026-10-02T08:00:00Z'});
+  const refresh={matches:[],raw:[{id:11,event:2,team_h:1,team_a:2,kickoff_time:completedFixture.kickoff,finished:true,team_h_score:3,team_a_score:1}],teams,source:'Official Fantasy Premier League',updatedAt:'2026-10-03T08:00:00Z'};
   const changes=await Promise.all([store.refreshFixtures(refresh),store.refreshFixtures(refresh)]);
   assert.equal(changes.reduce((sum,r)=>sum+r.resolved,0),1);
   assert.equal(await store.savePrediction(late.entry),false);
@@ -311,6 +312,44 @@ dbtest('Results use each provider latest pre-reschedule forecast and official sc
   const api=await response(resultsHandler,{method:'GET',url:'/api/results?page=1'});
   assert.equal(api.results.find(result=>result.id===11).forecasts.openai.correctOutcome,true);
   assert.deepEqual(api.results.find(result=>result.id===12).missingProviders,['openai']);
+});
+
+dbtest('daily refresh settles provisional final scores, retains both pre-kickoff forecasts, and leaves an unconfirmed 90-minute match unresolved',async()=>{
+  const kickoff='2026-10-10T11:00:00Z';
+  const provisional={...match,id:71,kickoff};
+  const elapsed={...match,id:72,kickoff:'2026-10-10T12:00:00Z'};
+  const source=baseline();source.predictions={};source.results=[];source.fixtures.matches=[provisional,elapsed];
+  await store.importSnapshot(source);
+  for(const [fixture,provider,forecast] of [
+    [provisional,'jev',{...prediction,outcome:'away',score:[1,2],generatedAt:'2026-10-10T10:00:00Z'}],
+    [provisional,'openai',{...prediction,generatedAt:'2026-10-10T10:05:00Z',model:'gpt-6-luna'}],
+  ]){
+    const run=await store.beginRun(`provisional-${fixture.id}-${provider}`,forecast.generatedAt);
+    await store.saveSnapshot(run.id,fixture.id,fixture);
+    await store.recordAttempt({runId:run.id,fixtureId:fixture.id,provider,status:'started',attemptAt:forecast.generatedAt});
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:fixture.id,provider,matchSignature:JSON.stringify(fixture),prediction:forecast,completedAt:forecast.generatedAt}),true);
+  }
+  const raw=[
+    {id:71,event:2,team_h:1,team_a:2,kickoff_time:kickoff,finished:false,finished_provisional:true,started:true,minutes:90,team_h_score:2,team_a_score:1},
+    {id:72,event:2,team_h:1,team_a:2,kickoff_time:elapsed.kickoff,finished:false,finished_provisional:false,started:true,minutes:90,team_h_score:4,team_a_score:0},
+  ];
+  await store.refreshFixtures({matches:[],raw,teams,source:source.fixtures.source,updatedAt:'2026-10-10T20:00:00Z'});
+  let page=await store.getResultsPage();
+  let result=page.results.find(item=>item.id===71);
+  assert.deepEqual(result.actualScore,[2,1]);
+  assert.equal(result.forecasts.jev.correctOutcome,false);
+  assert.equal(result.forecasts.openai.correctOutcome,true);
+  assert.equal(page.results.some(item=>item.id===72),false);
+
+  await store.refreshFixtures({matches:[],raw:[{...raw[0],finished:true,finished_provisional:false,team_h_score:1,team_a_score:1},raw[1]],teams,source:source.fixtures.source,updatedAt:'2026-10-10T21:00:00Z'});
+  page=await store.getResultsPage();
+  result=page.results.find(item=>item.id===71);
+  assert.deepEqual(result.actualScore,[1,1]);
+  assert.equal(result.forecasts.jev.correctOutcome,false);
+  assert.equal(result.forecasts.openai.correctOutcome,false);
+  assert.equal(result.forecasts.jev.correctScore,false);
+  assert.equal(result.forecasts.openai.correctScore,false);
+  assert.equal(page.results.some(item=>item.id===72),false);
 });
 
 dbtest('the Results API paginates the current season in groups of twenty',async()=>{

@@ -4,6 +4,15 @@ import {buildFixtures, parsePrediction, predictionQuestions, teamRef, matchOutco
 const teams=[{id:1,name:'Home',short_name:'HOM',code:1},{id:2,name:'Away',short_name:'AWY',code:2}];
 const match={id:1,team_h:1,team_a:2,event:1,kickoff_time:'2026-09-01T12:00:00Z',finished:true,started:true,team_h_score:2,team_a_score:1};
 test('includes all future and undated fixtures but excludes started, finished and past matches',()=>{const rows=[match,{...match,id:2,finished:false,started:false,kickoff_time:'2026-10-01T12:00:00Z'},{...match,id:3,finished:false,started:false,kickoff_time:null},{...match,id:4,finished:false,started:true,kickoff_time:'2026-10-02T12:00:00Z'},{...match,id:5,finished:false,started:false}];const result=buildFixtures(rows,teams,Date.parse('2026-09-26'));assert.deepEqual(result.map(x=>x.id),[2,3]);assert.equal(result[0].home.points,3);assert.equal(result[0].away.goalsAgainst,2);assert.equal(result[0].away.recent[0].result,'L');});
+test('provisional results contribute to form but elapsed matches without a finish flag do not',()=>{
+  const provisional={...match,id:20,kickoff_time:'2026-09-25T12:00:00Z',finished:false,finished_provisional:true,started:true,team_h_score:2,team_a_score:1};
+  const elapsed={...match,id:21,kickoff_time:'2026-09-25T12:00:00Z',finished:false,finished_provisional:false,started:true,minutes:90,team_h_score:4,team_a_score:0};
+  const upcoming={...match,id:22,kickoff_time:'2026-10-11T12:00:00Z',finished:false,finished_provisional:false,started:false};
+  const result=buildFixtures([provisional,elapsed,upcoming],teams,Date.parse('2026-10-10T20:00:00Z'));
+  assert.deepEqual(result.map(f=>f.id),[22]);
+  assert.equal(result[0].home.played,1);
+  assert.equal(result[0].home.goalsFor,2);
+});
 test('an explicitly cancelled fixture is excluded while a missing status remains eligible for display',()=>{const result=buildFixtures([{...match,id:2,finished:false,started:false,kickoff_time:null},{...match,id:3,finished:false,started:false,cancelled:true}],teams,Date.parse('2026-09-26'));assert.deepEqual(result.map(x=>x.id),[2]);assert.equal(result[0].fixtureStatus,'awaiting_date');});
 test('never uses future completed results as prediction evidence',()=>{const result=buildFixtures([{...match,kickoff_time:'2027-01-01'}, {...match,id:2,finished:false,started:false,kickoff_time:'2026-10-01'}],teams,Date.parse('2026-09-26'));assert.equal(result[0].home.played,0);});
 test('validates real distributions and exact score before displaying model predictions',()=>{const valid={answers:{outcome:{choice:'home',probabilities:{home:.6,draw:.25,away:.15}},score:{choice:'2_1'}}};assert.deepEqual(parsePrediction(valid).score,[2,1]);assert.throws(()=>parsePrediction({}));assert.throws(()=>parsePrediction({answers:{...valid.answers,outcome:{choice:'home',probabilities:{home:.9,draw:.9,away:.9}}}}));assert.throws(()=>parsePrediction({answers:{...valid.answers,score:{choice:'9_9'}}}));});
