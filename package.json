@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "db:migrate": "node scripts/db-migrate.mjs"
   },
   "engines": {
     "node": ">=22"

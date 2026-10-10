@@ -45,13 +45,21 @@ Existing validated Neon schemas need the retry upgrade before the issue #4 appli
 2. Check the target `DATABASE_SCHEMA` and private database connection. Use the new code to run the transaction below against that schema:
 
    ```sh
-   node --env-file=.env.local scripts/persistence.mjs upgrade-retries
+   DATABASE_SCHEMA=epl_oracle node --env-file=.env.local scripts/persistence.mjs upgrade-retries
    ```
 
    Review [the SQL](../db/upgrade-retries.sql) before running it. It adds attempt counts, next eligibility timestamps, claim tokens and exhausted/expired states. It changes no fixtures, evidence snapshots, successful forecasts, revisions, results or import validation markers. Existing unfinished attempts have unknown total request counts, so the upgrade closes their budgets conservatively. They become expired if their weekly cutoff passed, otherwise exhausted. Counts of zero on legacy rows mean their counts were not recorded. The next weekly run receives a new budget. Repeating the upgrade does not reset counters or close newly recorded attempts.
 3. Require the command's `retrySchema.verified` result, then deploy the new version. Verify both provider states and older generation dates through `/api/fixtures` and the fixture cards. Resume the jobs only after verification.
 
 The schema change is additive. The previous application can still read successful forecasts, but its prediction writer does not enforce the new budget. For an application rollback, keep prediction writers paused until a version that enforces the budget is serving them. Retain the added columns and states; do not remove application history or rerun the original import.
+
+## Deployment migrations
+
+Vercel runs `npm run db:migrate` before each build. The command checks that the configured static output is the project root (`outputDirectory: "."`), then applies pending checksummed migrations in a transaction while holding the persistence advisory lock. Production builds require `PERSISTENCE_BACKEND=neon`, `DATABASE_URL` and the explicit `DATABASE_SCHEMA=epl_oracle`.
+
+Preview builds run migrations only when `PERSISTENCE_BACKEND=neon`, `DATABASE_URL` and an explicit nonproduction `DATABASE_SCHEMA` are all configured. Use a dedicated isolated schema such as `epl_oracle_preview`; never point a preview schema at `epl_oracle`. If preview database configuration is incomplete, the migration command prints that it skipped database migrations and lets the static build continue. No database credentials are needed or transferred for that static preview build.
+
+The first retry-status migration remains manual. Before deploying the application version that uses retry limits, pause writers, wait six minutes for in-flight jobs, and run the documented `upgrade-retries` command. The build runner verifies the `retry_schema_v1` checkpoint and fails with the operator instruction if it is missing, even when a migration-ledger row exists. Future additive migrations marked automatic run once their checksum is absent from the ledger.
 
 ## Rollback
 
