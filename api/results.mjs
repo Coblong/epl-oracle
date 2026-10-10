@@ -1,5 +1,4 @@
 import {getStore} from '../lib/store.mjs';
-import {accuracySummary} from '../lib/football.mjs';
 
 const json = (res, status, data) => {
   res.statusCode = status;
@@ -11,12 +10,10 @@ const json = (res, status, data) => {
 export default async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, {error: 'Method not allowed'});
   try {
-    const results = await getStore().getResults();
-    const sorted = [...results].sort((a, b) => Date.parse(b.kickoff) - Date.parse(a.kickoff));
-    return json(res, 200, {
-      results: sorted.slice(0, 20),
-      summary: accuracySummary(results),
-    });
+    const requestedPage=req.query?.page ?? (req.url ? new URL(req.url,'http://localhost').searchParams.get('page') : null);
+    const store=getStore();
+    const resultPage=await store.getResultsPage({page:requestedPage ?? 1,pageSize:20});
+    return json(res, 200, resultPage);
   } catch (e) {
     console.error(e);
     return json(res, 502, {error: 'Unable to load the track record. Please try again.'});

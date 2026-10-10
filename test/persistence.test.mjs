@@ -42,10 +42,10 @@ after(async()=>{
 });
 const dbtest=(name,fn)=>test(name,{skip:!enabled},fn);
 const generateWeeklyPredictions=(store,providers,now,wait)=>runWeekly(store,providers,now,wait,()=>new Date(now));
-async function response(handler) {
+async function response(handler,request={method:'GET'}) {
   let body;
   const res={setHeader(){},end(text){body=JSON.parse(text);}};
-  await handler({method:'GET'},res);
+  await handler(request,res);
   assert.equal(res.statusCode,200);
   return body;
 }
@@ -56,7 +56,7 @@ async function save(m=match,p=prediction,key='refresh') {
   return {run,entry:{runId:run.id,fixtureId:m.id,matchSignature:JSON.stringify(m),prediction:p}};
 }
 
-dbtest('unvalidated Neon data cannot be served and a validated import preserves existing API views',async()=>{
+dbtest('unvalidated Neon data cannot be served and the new Results API does not copy legacy history',async()=>{
   await assert.rejects(store.getFixtureView(),/not passed migration validation/);
   const report=await store.importSnapshot(baseline());
   assert.deepEqual([report.fixtures,report.upcoming,report.activePredictions,report.results],[2,1,1,1]);
@@ -66,7 +66,7 @@ dbtest('unvalidated Neon data cannot be served and a validated import preserves 
   assert.equal(fixtures.matches[0].prediction.outcome,'home');
   assert.deepEqual(fixtures.matches[0].prediction.score,[2,1]);
   assert.equal(results.summary.resolved,1);
-  assert.equal(results.results[0].correctScore,true);
+  assert.deepEqual(results.results,[]);
 });
 dbtest('repeating an import is idempotent and changed snapshots cannot overwrite existing data',async()=>{
   const first=await store.importSnapshot(baseline());
@@ -256,6 +256,95 @@ dbtest('daily refresh resolves a final score once and does not revive it with a 
   assert.equal(results.summary.scoreCorrect,1);
   assert.deepEqual(results.results.find(r=>r.id===11).actualScore,[3,1]);
   assert.equal((await store.getRun(late.run.id)).predictions.length,0);
+});
+
+dbtest('Results use each provider latest pre-reschedule forecast and official score corrections update correctness',async()=>{
+  const postponed={...match,kickoff:'2099-10-10T12:00:00Z'};
+  const second={...match,id:12,kickoff:'2099-10-12T15:00:00Z'};
+  const source=baseline();source.predictions={};source.results=[];source.fixtures.matches=[postponed,second];
+  await store.importSnapshot(source);
+  async function saveForecast(fixture,provider,prediction,key){
+    const run=await store.beginRun(key,prediction.generatedAt);
+    await store.saveSnapshot(run.id,fixture.id,fixture);
+    await store.recordAttempt({runId:run.id,fixtureId:fixture.id,provider,status:'started',attemptAt:prediction.generatedAt});
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:fixture.id,provider,matchSignature:JSON.stringify(fixture),prediction,completedAt:prediction.generatedAt}),true);
+  }
+  const jevOld={...prediction,outcome:'away',score:[0,0],generatedAt:'2099-10-09T09:00:00Z'};
+  await saveForecast(postponed,'jev',jevOld,'old-before-postponement');
+  const revised={...postponed,kickoff:'2099-10-12T12:00:00Z'};
+  await store.refreshFixtures({matches:[revised,second],raw:[
+    {id:11,event:2,team_h:1,team_a:2,kickoff_time:revised.kickoff,finished:false,started:false},
+    {id:12,event:2,team_h:1,team_a:2,kickoff_time:second.kickoff,finished:false,started:false},
+  ],teams,source:source.fixtures.source,updatedAt:'2099-10-10T08:00:00Z'});
+  assert.deepEqual((await store.getFixtures()).matches.find(f=>f.id===11),revised);
+  const jevLatest={...prediction,score:[3,1],generatedAt:'2099-10-11T09:00:00Z'};
+  const openaiLatest={...prediction,outcome:'away',score:[2,1],model:'gpt-6-luna',generatedAt:'2099-10-11T10:00:00Z'};
+  await saveForecast(revised,'jev',jevLatest,'jev-after-reschedule');
+  await saveForecast(revised,'openai',openaiLatest,'openai-after-reschedule');
+  await saveForecast(second,'jev',{...prediction,generatedAt:'2099-10-11T11:00:00Z'},'second-jev');
+
+  const raw=[
+    {id:11,event:2,team_h:1,team_a:2,kickoff_time:revised.kickoff,finished:true,team_h_score:2,team_a_score:1},
+    {id:12,event:2,team_h:1,team_a:2,kickoff_time:second.kickoff,finished:true,team_h_score:1,team_a_score:0},
+  ];
+  await store.refreshFixtures({matches:[],raw,teams,source:source.fixtures.source,updatedAt:'2099-10-13T08:00:00Z'});
+  let page=await store.getResultsPage({page:1,pageSize:20});
+  const first=page.results.find(result=>result.id===11);
+  assert.deepEqual(first.actualScore,[2,1]);
+  assert.deepEqual(first.forecasts.jev.prediction.score,[3,1]);
+  assert.equal(first.forecasts.jev.correctOutcome,true);
+  assert.equal(first.forecasts.jev.correctScore,false);
+  assert.equal(first.forecasts.openai.prediction.outcome,'away');
+  assert.equal(first.forecasts.openai.correctOutcome,false);
+  assert.equal(first.forecasts.openai.correctScore,true);
+  assert.deepEqual(page.results.find(result=>result.id===12).missingProviders,['openai']);
+
+  const corrected=raw.map(f=>f.id===11?{...f,team_h_score:0,team_a_score:1}:f);
+  await store.refreshFixtures({matches:[],raw:corrected,teams,source:source.fixtures.source,updatedAt:'2099-10-14T08:00:00Z'});
+  page=await store.getResultsPage({page:1,pageSize:20});
+  const updated=page.results.find(result=>result.id===11);
+  assert.deepEqual(updated.actualScore,[0,1]);
+  assert.equal(updated.forecasts.jev.correctOutcome,false);
+  assert.equal(updated.forecasts.openai.correctOutcome,true);
+  assert.equal(updated.forecasts.openai.correctScore,false);
+  assert.equal(page.summary.resolved,2);
+  const api=await response(resultsHandler,{method:'GET',url:'/api/results?page=1'});
+  assert.equal(api.results.find(result=>result.id===11).forecasts.openai.correctOutcome,true);
+  assert.deepEqual(api.results.find(result=>result.id===12).missingProviders,['openai']);
+});
+
+dbtest('the Results API paginates the current season in groups of twenty',async()=>{
+  const source=baseline();source.predictions={};source.results=[];
+  source.fixtures.matches=Array.from({length:21},(_,index)=>({...match,id:100+index,kickoff:`2099-10-${String(index+1).padStart(2,'0')}T12:00:00Z`}));
+  await store.importSnapshot(source);
+  const raw=source.fixtures.matches.map(f=>({id:f.id,event:f.gameweek,team_h:1,team_a:2,kickoff_time:f.kickoff,finished:true,team_h_score:1,team_a_score:0}));
+  await store.refreshFixtures({matches:[],raw,teams,source:source.fixtures.source,updatedAt:'2099-11-01T08:00:00Z'});
+  const first=await response(resultsHandler,{method:'GET',url:'/api/results?page=1'});
+  const secondPage=await response(resultsHandler,{method:'GET',url:'/api/results?page=2'});
+  assert.equal(first.results.length,20);
+  assert.equal(first.pageSize,20);
+  assert.equal(first.total,21);
+  assert.equal(first.hasMore,true);
+  assert.equal(secondPage.results.length,1);
+  assert.equal(secondPage.hasMore,false);
+});
+
+dbtest('lost or missing fixture data stays awaiting update and only an explicit cancellation removes it from totals',async()=>{
+  const source=baseline();await store.importSnapshot(source);
+  const lost={id:11,event:2,team_h:1,team_a:2,kickoff_time:null,finished:false,started:false,provisional_start_time:true};
+  await store.refreshFixtures({matches:[{...match,kickoff:null,fixtureStatus:'awaiting_date'}],raw:[lost],teams,source:source.fixtures.source,updatedAt:'2026-10-02T08:00:00Z'});
+  let fixture=(await store.getFixtures()).matches[0];
+  assert.equal(fixture.kickoff,null);
+  assert.equal(fixture.fixtureStatus,'awaiting_rescheduling');
+  await store.refreshFixtures({matches:[],raw:[{id:99,event:2,team_h:1,team_a:2,kickoff_time:'2099-10-13T12:00:00Z',finished:false,started:false}],teams,source:source.fixtures.source,updatedAt:'2026-10-03T08:00:00Z'});
+  fixture=(await store.getFixtures()).matches[0];
+  assert.equal(fixture.fixtureStatus,'awaiting_update');
+  const cancelled={...lost,cancelled:true};
+  await store.refreshFixtures({matches:[],raw:[cancelled],teams,source:source.fixtures.source,updatedAt:'2026-10-04T08:00:00Z'});
+  assert.deepEqual((await store.getFixtures()).matches,[]);
+  const page=await store.getResultsPage();
+  assert.equal(page.results.find(result=>result.id===11).status,'cancelled');
+  assert.equal(page.summary.resolved,1);
 });
 dbtest('a stale fixture refresh or prediction cannot overwrite newer evidence',async()=>{
   await store.importSnapshot(baseline());
