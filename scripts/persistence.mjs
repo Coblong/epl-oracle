@@ -39,12 +39,13 @@ try {
       if (fingerprint(normalize(await captureSnapshot(createMigrationReader()))) !== fingerprint(normalize(snapshot))) throw new Error('Blob restoration verification failed. Keep jobs paused and retry restoration.');
       console.log(JSON.stringify({restored:true, ...inspectSnapshot(snapshot)}, null, 2));
     }
-  } else if (['setup','import','verify','export-neon'].includes(command)) {
+  } else if (['setup','upgrade-retries','import','verify','export-neon'].includes(command)) {
     if (command === 'import' && !args.includes('--apply')) {
       console.log(JSON.stringify({dryRun:true, ...inspectSnapshot(await source())}, null, 2));
     } else {
       const store = createPostgresStore(databasePool(), process.env.DATABASE_SCHEMA || 'epl_oracle');
       if (command === 'setup') { await store.initialize(); console.log('Database schema initialized. Backend has not been changed.'); }
+      if (command === 'upgrade-retries') console.log(JSON.stringify({retrySchema:await store.upgradeRetries()},null,2));
       if (command === 'import') console.log(JSON.stringify(await store.importSnapshot(await source()), null, 2));
       if (command === 'verify' || command === 'export-neon') {
         const {fixtures, predictions} = await store.getFixtureView();
@@ -59,7 +60,7 @@ try {
         }
       }
     }
-  } else throw new Error('Use setup, export-blob --output FILE, import --input FILE [--apply], verify --input FILE, export-neon --output FILE, or restore-blob --input FILE [--apply].');
+  } else throw new Error('Use setup, upgrade-retries, export-blob --output FILE, import --input FILE [--apply], verify --input FILE, export-neon --output FILE, or restore-blob --input FILE [--apply].');
 } catch (error) {
   // Drivers may include connection details in error objects; do not log them.
   const safe = /^(Invalid|Duplicate|Fixture|Source|Blob |Migration |Neon |A different|Supply |Use |Database |DATABASE_URL|PERSISTENCE_BACKEND)/.test(error.message);

@@ -12,20 +12,18 @@ const json = (res, status, data) => {
 
 export default async function handler(req, res) {
   if (!authorizeCron(req)) return json(res, 401, {error: 'Unauthorized'});
-  const providers = {};
-  if (process.env.AI_GATEWAY_API_KEY) providers.jev = predictMatch;
-  if (process.env.OPENAI_API_KEY) providers.openai = predictDecision;
+  const providers = {jev:predictMatch,openai:predictDecision};
   const now = new Date();
   const context = weeklyRunContext(now);
-  if (!context) return json(res, 200, {ok:true, skipped:'Outside the Wednesday forecast window.'});
-  if (!Object.keys(providers).length) return json(res, 200, {ok:true, skipped:'No prediction providers are configured.'});
-  if (providers.openai && process.env.PERSISTENCE_BACKEND !== 'neon') return json(res, 409, {error:'Dual-provider predictions require validated Neon persistence.'});
+  if (process.env.PERSISTENCE_BACKEND !== 'neon') return json(res, context ? 409 : 200, context
+    ? {error:'Dual-provider predictions require validated Neon persistence.'}
+    : {ok:true,skipped:'Outside the weekly forecast recovery window.'});
   try {
     const store = getStore();
     const stats = await generateWeeklyPredictions(store, providers, now);
-    return json(res, 200, {ok:true, run:context.key, ...stats});
+    return json(res, 200, {ok:true, ...(context ? {run:context.key} : {}), ...stats});
   } catch (e) {
-    console.error(e);
+    console.error('Weekly prediction job failed. Check server configuration.');
     return json(res, 502, {error:'Unable to generate predictions. Check server configuration and retry.'});
   }
 }

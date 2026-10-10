@@ -24,7 +24,7 @@ Visitors want Jev and OpenAI Decisions API opinions on upcoming Premier League f
 - **R5** (confirmed): Save a shared input snapshot for each fixture's weekly run. Both providers and retries must use that snapshot. Stories: 1, 4
 - **R6** (confirmed): Display each provider's latest successful prediction and its generation timestamp. Preserve earlier prediction versions. Stories: 1, 4
 - **R7** (confirmed): Persist each successful provider prediction immediately. Failure by another provider must not discard it. Stories: 4
-- **R8** (confirmed): Retry failed predictions before the weekly run's recovery deadline, Thursday 09:00 Europe/London, exclusive. Do not regenerate an already successful prediction for that run. Stories: 4
+- **R8** (confirmed): Retry failed or missing predictions before the weekly run's recovery deadline, Thursday 09:00 Europe/London, exclusive. Allow at most three total provider attempts per fixture and weekly run, with attempt starts at least 15 minutes apart. Each counted attempt makes one provider HTTP request. Do not regenerate an already successful prediction for that run. The product owner approved the attempt limit and backoff on 10 October 2026. Stories: 4
 - **R9** (confirmed): When a refresh fails, retain any older successful prediction and show its date and failed-refresh status. When no prediction exists, explicitly show that it is missing. Stories: 1, 4
 - **R10** (confirmed): Preserve separate outcome and exact-score forecasts, even when they disagree. Evaluate and highlight correct outcomes and exact scores independently. Stories: 1, 2
 - **R11** (confirmed): Provide Upcoming and Results views in the fixture section. Completed fixtures must show the actual score alongside both providers' final forecasts. Stories: 1, 2
@@ -77,7 +77,6 @@ Visitors want Jev and OpenAI Decisions API opinions on upcoming Premier League f
 
 ## Open questions
 
-- What backoff should provider retries use? Owner: product owner and implementer.
 - Should forecasts proceed using older fixture data when the official feed fails? Owner: product owner.
 - How should postponements and cancellations be identified when the feed does not explicitly distinguish them? Owner: implementer, with product owner agreement.
 - Which kickoff deadline applies after postponement, particularly when the original kickoff has passed? Owner: product owner.
