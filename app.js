@@ -28,10 +28,17 @@ function resultRow(r){
 }
 async function loadResults(page=1,append=false){
   try{
-    const d=await request(`/api/results?page=${page}`),s=d.summary;
+    const d=await request(`/api/results?page=${page}`);
     resultsPage=d.page;resultsTotal=d.total;
-    $('#tr-resolved').textContent=s.resolved;$('#tr-outcome').textContent=s.resolved?`${Math.round(s.outcomeAccuracy*100)}%`:'—';$('#tr-score').textContent=s.resolved?`${Math.round(s.scoreAccuracy*100)}%`:'—';
-    $('#track-notice').textContent=s.resolved?`${s.outcomeCorrect} of ${s.resolved} outcomes correct · ${s.scoreCorrect} exact scores.`:'No predicted fixtures have finished yet.';
+    for(const provider of ['jev','openai']){
+      const summary=d.providerSummaries?.[provider];
+      $(`#tr-${provider}-fixtures`).textContent=summary?.resolved ?? '—';
+      $(`#tr-${provider}-result`).textContent=summary?.resolved ? `${Math.round(summary.outcomeAccuracy*100)}%` : '—';
+      $(`#tr-${provider}-scores`).textContent=summary?.resolved ? `${Math.round(summary.scoreAccuracy*100)}%` : '—';
+    }
+    $('#track-notice').textContent='Completed fixtures with a pre-match prediction · Result and exact score accuracy are measured separately.';
+    $('#track-notice').classList.remove('error');
+    $('#results-notice').classList.remove('error');
     if(!append)$('#results-list').innerHTML='';
     if(d.results.length)$('#results-list').insertAdjacentHTML('beforeend',d.results.map(resultRow).join(''));
     else if(!append)$('#results-list').innerHTML='<div class="empty">No fixtures have finished yet this season.</div>';
