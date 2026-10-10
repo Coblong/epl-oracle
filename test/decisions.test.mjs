@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {decisionsRequest,parseDecision,predictDecision} from '../lib/decisions.mjs';
 import {predictionEvidence,predictionQuestions} from '../lib/football.mjs';
-import {forecastPanel,forecastNotice} from '../forecast-view.mjs';
+import {forecastAvailability,forecastPanel,forecastNotice} from '../forecast-view.mjs';
 
 const match={id:55,home:{name:'Home',short:'HOM'},away:{name:'Away',short:'AWY'}};
 const response=()=>({model:'gpt-6-luna',answers:Object.entries(predictionQuestions()).map(([name,q])=>({name,type:'choice',choice:name==='outcome'?'away':'1_0',probabilities:Object.keys(q.criteria).map(value=>({value,probability:value===(name==='outcome'?'away':'1_0')?1:0}))}))});
@@ -55,23 +55,35 @@ test('a rate limit is one provider attempt and does not retry inside the adapter
     assert.equal(calls,1);
   } finally {globalThis.fetch=original;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
-test('forecast panels expose separate outcomes, scores, timestamps and missing opinions safely',()=>{
+test('forecast panels expose forecasts without model names or missing placeholders',()=>{
   const p={...parseDecision(response()),generatedAt:'2026-10-09T09:00:00Z',model:'<script>bad</script>',stale:true};
   const html=forecastPanel(match,'openai',p);
-  assert.match(html,/OpenAI Decisions/);assert.match(html,/Away win/);assert.match(html,/1 : 0/);
+  assert.match(html,/OpenAI/);assert.doesNotMatch(html,/OpenAI Decisions/);assert.match(html,/Away win/);assert.match(html,/1 : 0/);
   assert.match(html,/2026-10-09T09:00:00Z/);assert.match(html,/earlier fixture information/);
-  assert.ok(!html.includes('<script>'));assert.match(forecastPanel(match,'jev',null),/No prediction available/);
+  assert.ok(!html.includes('<script>'));assert.ok(!html.includes('gpt-6-luna'));assert.equal(forecastPanel(match,'jev',null), '');
+  assert.equal(forecastPanel(match,'openai',p,{status:'started',availability:'fresh'}).includes('Refresh in progress'),false);
+  assert.equal(forecastPanel(match,'openai',p,{status:'succeeded',availability:'fresh'}).includes('Latest refresh succeeded'),false);
+  assert.equal(forecastPanel(match,'openai',null,{status:'failed',availability:'missing'}),'');
+  assert.match(forecastPanel(match,'openai',p,{status:'failed',availability:'retained'}),/Refresh failed.*Retaining the earlier forecast/);
 });
 
 test('forecast notice only claims automatic updates for enabled providers',()=>{
   const none=forecastNotice({jev:false,openai:false});
   assert.equal(none.error,true);assert.ok(!none.text.includes('automatically'));
   assert.match(forecastNotice({jev:true,openai:false}).text,/Jev forecasts/);
-  assert.match(forecastNotice({jev:true,openai:false}).text,/OpenAI Decisions is currently unavailable/);
-  assert.match(forecastNotice({jev:false,openai:true}).text,/OpenAI Decisions forecasts/);
+  assert.match(forecastNotice({jev:true,openai:false}).text,/OpenAI is currently unavailable/);
+  assert.match(forecastNotice({jev:false,openai:true}).text,/OpenAI forecasts/);
   assert.match(forecastNotice({jev:false,openai:true}).text,/Jev is currently unavailable/);
-  assert.match(forecastNotice({jev:true,openai:true}).text,/Jev and OpenAI Decisions forecasts/);
+  assert.match(forecastNotice({jev:true,openai:true}).text,/Jev and OpenAI forecasts/);
   assert.match(forecastNotice({jev:true,openai:true}).text,/next ten days/);
   assert.match(forecastNotice({jev:true,openai:true}).text,/Wednesday.*09:00.*09:59.*London/);
   assert.ok(!forecastNotice({jev:true,openai:true}).text.includes('each day'));
+});
+
+test('a matching old forecast and attempt are retained when the expected weekly run changes',()=>{
+  const previous={runId:'run-previous',runKey:'weekly:2026-09-30T08:00:00.000Z'};
+  const attempt={runId:'run-previous',runKey:previous.runKey};
+  assert.equal(forecastAvailability(previous,attempt,'weekly:2026-10-07T08:00:00.000Z'),'retained');
+  assert.equal(forecastAvailability({...previous,runId:'run-current',runKey:'weekly:2026-10-07T08:00:00.000Z'},attempt,'weekly:2026-10-07T08:00:00.000Z'),'retained');
+  assert.equal(forecastAvailability({...previous,runKey:'weekly:2026-10-07T08:00:00.000Z'}, {...attempt,runId:'new-run'},'weekly:2026-10-07T08:00:00.000Z'),'retained');
 });

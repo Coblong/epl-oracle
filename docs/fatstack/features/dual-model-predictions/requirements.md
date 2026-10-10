@@ -25,7 +25,7 @@ Visitors want Jev and OpenAI Decisions API opinions on upcoming Premier League f
 - **R6** (confirmed): Display each provider's latest successful prediction and its generation timestamp. Preserve earlier prediction versions. Stories: 1, 4
 - **R7** (confirmed): Persist each successful provider prediction immediately. Failure by another provider must not discard it. Stories: 4
 - **R8** (confirmed): Retry failed or missing predictions before the weekly run's recovery deadline, Thursday 09:00 Europe/London, exclusive. Allow at most three total provider attempts per fixture and weekly run, with attempt starts at least 15 minutes apart. Each counted attempt makes one provider HTTP request. Do not regenerate an already successful prediction for that run. The product owner approved the attempt limit and backoff on 10 October 2026. Stories: 4
-- **R9** (confirmed): When a refresh fails, retain any older successful prediction and show its date and failed-refresh status. When no prediction exists, explicitly show that it is missing. Stories: 1, 4
+- **R9** (confirmed): When a refresh fails, retain any older successful prediction and show its date and failed-refresh status. Do not render a forecast panel when no prediction exists. Stories: 1, 4
 - **R10** (confirmed): Preserve separate outcome and exact-score forecasts, even when they disagree. Evaluate and highlight correct outcomes and exact scores independently. Stories: 1, 2
 - **R11** (confirmed): Provide Upcoming and Results views in the fixture section. Completed fixtures must show the actual score alongside both providers' final forecasts. Stories: 1, 2
 - **R12** (confirmed): For each completed fixture and provider, evaluate the latest successful prediction made before kickoff. Earlier revisions must not add extra observations to the track record. Stories: 2, 3
@@ -59,7 +59,7 @@ Visitors want Jev and OpenAI Decisions API opinions on upcoming Premier League f
 - Overlapping ten-day windows or unchanged statistics: refresh both providers and preserve revisions. Requirements: R4, R6. (confirmed)
 - One provider succeeds and another fails: retain the success and retry only the failure with the shared snapshot. Requirements: R5, R7, R8, R9. (confirmed)
 - Failed refresh with an older forecast: retain and label the older forecast. Requirement: R9. (confirmed)
-- Failure without an older forecast: show a missing prediction and omit it from that provider's scoring denominator. Requirements: R9, R15. (assumed)
+- Failure without an older forecast: omit the forecast panel and exclude it from that provider's scoring denominator. Requirements: R9, R15. (confirmed)
 - Contradictory outcome and scoreline: display and score them separately. Requirement: R10. (confirmed)
 - Undated fixture: wait until it has an eligible kickoff date before predicting. Requirement: R3. (confirmed)
 - Postponed or cancelled fixture: retain postponed forecasts and refresh when eligible; exclude cancellations from accuracy totals. Requirements: R16, R17. (confirmed)
