@@ -25,6 +25,11 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 - Retain an older successful prediction when a provider refresh fails. Show its date and the failed refresh explicitly.
 - Save successful provider predictions immediately and retry failures before the weekly run's Thursday 09:00 Europe/London recovery deadline, exclusive, using that run's saved input. A retry must not replace an already successful prediction for that run.
 - Continue daily fixture and actual-result updates independently of weekly prediction generation.
+- In Results, show the current season with 20 fixtures per page. When a completed fixture has no eligible forecast from one provider, label that provider as missing. Keep empty forecast panels hidden in Upcoming.
+- For a rescheduled fixture, use its revised kickoff as the forecast eligibility deadline. Reject a provider response completed at or after that kickoff.
+- Apply later official score corrections to the stored result and recalculate both providers' correctness from their eligible forecasts.
+- If the official feed removes a kickoff date, retain the fixture as awaiting rescheduling. Do not infer cancellation from a missing fixture or date. Exclude a cancelled fixture from accuracy totals only when the feed explicitly marks it cancelled.
+- The new Results view uses Neon data going forward. Do not import or backfill Blob results or fabricate historical forecasts; the existing Jev track-record rows can remain until issue #6.
 - Keep outcome and exact-score predictions separate, even when they disagree. Evaluate and highlight correctness separately.
 - Provide Upcoming and Results views in the fixture section. Results show actual scores alongside both final forecasts.
 - Extend the aggregate track record to both providers, including sample counts, outcome accuracy, exact-score accuracy, and Brier score for outcome probabilities.
@@ -45,10 +50,8 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 ## Open questions
 
 - Define retry backoff.
-- Determine how to show feed states for postponements and cancellations when the official fixture feed does not explicitly provide those distinctions.
-- Determine the treatment of a postponed fixture whose prior kickoff has already passed, including which prediction deadline applies after rescheduling.
+- Determine how to represent an explicit cancellation if the official fixture feed adds such a signal. The current feed has no cancellation field.
 - Define the Brier score convention and denominator consistently for full history and shared-fixture comparisons.
-- Define the Results view's pagination and retention presentation.
 - Confirm Neon provisioning, database region, credentials, and the production migration and cutover procedure.
 - Verify the latest Decisions API schema, limits, and model availability, and configure its server-only credential.
 
@@ -66,10 +69,10 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 - A fixture finishes: show the actual score and evaluate the latest successful pre-kickoff forecast for each provider independently. (confirmed)
 - A fixture finishes with a prediction from only one provider: include it in that provider's full history, but exclude it from the shared-fixture comparison. (confirmed)
 - A Wednesday run is duplicated or overlaps another job: use database constraints and transactions to prevent duplicate successful predictions or lost updates. (confirmed)
-- A request starts before kickoff but completes after kickoff: determine whether it is eligible for display and scoring. (open)
+- A request starts before kickoff but completes at or after the applicable kickoff: reject the forecast. (confirmed)
 - A scheduled run is missed entirely: recovery behaviour remains to be specified. (open)
 - The fixture feed fails: whether weekly forecasts should proceed using older fixture data remains to be specified. (open)
-- An official result is corrected later: determine whether to update stored results and recalculate track records. (open)
+- An official result is corrected later: replace the stored result and recalculate provider correctness. (confirmed)
 - Existing Jev records have no corresponding OpenAI prediction: preserve them in Jev's full history and exclude them from the shared-fixture comparison. (confirmed)
 - Migration cannot reconstruct older Jev revisions: preserve available records without inventing missing history. (confirmed)
 - Database migration validation fails: do not cut over; retain Blob data for rollback. (assumed)

@@ -53,6 +53,10 @@ Existing validated Neon schemas need the retry upgrade before the issue #4 appli
 
 The schema change is additive. The previous application can still read successful forecasts, but its prediction writer does not enforce the new budget. For an application rollback, keep prediction writers paused until a version that enforces the budget is serving them. Retain the added columns and states; do not remove application history or rerun the original import.
 
+## Additive Results schema migration
+
+The automatic `002-results` migration adds actual fixture results and one evaluation row per provider. It does not copy legacy results or forecasts into these tables. Daily fixture refreshes populate them from current Neon fixtures and saved provider forecasts, then update actual scores and recalculate correctness after an official correction. Results reads use the new tables. The existing Jev track-record summary continues to use the legacy `results` rows until issue #6 changes that view. Blob import and rollback procedures above describe the original cutover and remain archival; issue #5's active Results flow uses Neon only. The migration runner applies this version once under the existing schema lock.
+
 ## Deployment migrations
 
 Vercel runs `npm run db:migrate` before each build. The command checks that the configured static output is the project root (`outputDirectory: "."`), then applies pending checksummed migrations in a transaction while holding the persistence advisory lock. Production builds require `PERSISTENCE_BACKEND=neon`, `DATABASE_URL` and the explicit `DATABASE_SCHEMA=epl_oracle`.
@@ -96,4 +100,4 @@ TEST_DATABASE_URL=postgresql://USER@127.0.0.1:PORT/DATABASE npm test
 
 Without `TEST_DATABASE_URL`, database integration tests are explicitly skipped. With it, tests create a randomly named schema, exercise the real PostgreSQL transactions and API handlers, and delete only that schema afterward. Never pass a connection string as a literal shell command for a remote credential; set it through the private environment instead.
 
-The database checks cover import parity and idempotence, rejection before validation, invalid-source and insert-failure rollback, immutable inputs, retained revisions, attempt status, concurrent writes, final-score resolution, duplicate refreshes and rejection of older fixture data.
+The database checks cover import parity and idempotence, migration of existing Jev history, rejection before validation, invalid-source and insert-failure rollback, immutable inputs, retained revisions, attempt status, concurrent writes, result corrections, provider-specific pre-kickoff forecasts, result pagination, postponed fixture states, duplicate refreshes and rejection of older fixture data.

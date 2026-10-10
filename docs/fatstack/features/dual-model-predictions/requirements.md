@@ -75,14 +75,20 @@ Visitors want Jev and OpenAI Decisions API opinions on upcoming Premier League f
 - Reconstructing unavailable historic forecasts or generating retrospective OpenAI forecasts for existing Jev results. (confirmed)
 - A visitor-facing interface for browsing every prediction revision. History will be persisted, but this interface has not been requested. (assumed)
 
+## Confirmed issue #5 decisions
+
+- After a fixture is rescheduled, its revised kickoff is the deadline for forecast eligibility. A successful response completed at or after that kickoff is rejected.
+- The new Results view uses results and forecast revisions already stored in Neon and records future fixture completions through the daily refresh. It does not import or backfill result history from Blob or fabricate historical provider forecasts. Existing Jev track-record rows remain available until issue #6 updates the aggregate view.
+- Later official score corrections replace the stored actual score and recalculate each provider's correctness from its eligible forecast.
+- The Results view shows the current season, 20 fixtures per page.
+- If the official feed removes a kickoff date, retain the fixture as awaiting rescheduling. A missing fixture or date is not evidence of cancellation; exclude a fixture from accuracy totals only when the feed explicitly marks it cancelled.
+- Show an explicit missing-provider state in Results when a completed fixture has no eligible forecast. Upcoming cards continue to hide empty forecast panels.
+
 ## Open questions
 
 - Should forecasts proceed using older fixture data when the official feed fails? Owner: product owner.
-- How should postponements and cancellations be identified when the feed does not explicitly distinguish them? Owner: implementer, with product owner agreement.
-- Which kickoff deadline applies after postponement, particularly when the original kickoff has passed? Owner: product owner.
+- How should an explicit cancellation signal be represented if the official feed adds one? The current feed has no cancellation field. Owner: implementer.
 - Which Brier score convention and denominators should be used? Owner: implementer, with product owner agreement.
-- Should later official score corrections update results and recalculate track records? Owner: product owner.
-- How should Results pagination and history presentation work? Owner: product owner.
 - What are the Neon region, provisioning, credentials and production cutover procedure? Owner: operator and implementer.
 - Verify the Decisions API schema, limits and model availability, and configure its server-only credential. Owner: implementer and operator.
 
