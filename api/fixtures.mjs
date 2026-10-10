@@ -11,7 +11,7 @@ const json = (res, status, data) => {
 export default async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, {error: 'Method not allowed'});
   try {
-    const {fixtures, predictions, providerPredictions} = await getStore().getFixtureView();
+    const {fixtures, predictions, providerPredictions, forecastAttempts} = await getStore().getFixtureView();
     if (!fixtures) return json(res, 503, {error: 'Fixtures have not been loaded yet. Please check back shortly.', configured: !!process.env.AI_GATEWAY_API_KEY});
     const now = Date.now();
     const matches = fixtures.matches
@@ -28,7 +28,14 @@ export default async function handler(req, res) {
           try { stale = fingerprint(JSON.parse(forecast.matchSignature)) !== fingerprint(m); } catch {}
           forecasts[provider] = {...forecast.prediction, provider, stale};
         }
-        return {...m, ...(matches ? {prediction:entry.prediction} : {}), predictions:forecasts};
+        const forecastStates = {};
+        for (const provider of ['jev','openai']) {
+          const attempt = forecastAttempts?.[m.id]?.[provider];
+          const forecast = providerPredictions?.[m.id]?.[provider];
+          forecastStates[provider] = {...attempt, availability: !forecasts[provider] ? 'missing'
+            : forecasts[provider].stale || attempt && attempt.runId !== forecast?.runId ? 'retained' : 'fresh'};
+        }
+        return {...m, ...(matches ? {prediction:entry.prediction} : {}), predictions:forecasts, forecastStates};
       });
     return json(res, 200, {
       matches,

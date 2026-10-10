@@ -6,8 +6,10 @@ import {createPostgresStore} from '../lib/postgres-store.mjs';
 import {closeDatabase} from '../lib/store.mjs';
 import fixturesHandler from '../api/fixtures.mjs';
 import resultsHandler from '../api/results.mjs';
+import predictionsHandler from '../api/cron/predictions.mjs';
 import {predictFixtures} from '../lib/prediction-job.mjs';
-import {generateWeeklyPredictions} from '../lib/weekly-predictions.mjs';
+import {generateWeeklyPredictions as runWeekly} from '../lib/weekly-predictions.mjs';
+import {forecastPanel} from '../forecast-view.mjs';
 
 const enabled=!!process.env.TEST_DATABASE_URL;
 const schema='epl_oracle_test_'+randomUUID().replaceAll('-','');
@@ -39,6 +41,7 @@ after(async()=>{
   await pool.end();
 });
 const dbtest=(name,fn)=>test(name,{skip:!enabled},fn);
+const generateWeeklyPredictions=(store,providers,now,wait)=>runWeekly(store,providers,now,wait,()=>new Date(now));
 async function response(handler) {
   let body;
   const res={setHeader(){},end(text){body=JSON.parse(text);}};
@@ -217,12 +220,14 @@ dbtest('provider claims serialize overlaps, retry failures once, and never recla
   const run=await store.beginRun('weekly-claim-recovery','2099-10-07T08:00:00Z');
   await store.saveSnapshot(run.id,match.id,match);
   const claimUntil='2099-10-08T08:00:00Z';
-  const entry={runId:run.id,fixtureId:match.id,provider:'jev',claimUntil};
+  const entry={runId:run.id,fixtureId:match.id,provider:'jev',claimUntil,attemptAt:'2099-10-07T08:00:00Z'};
   const first=await Promise.all([store.claimAttempt(entry),store.claimAttempt(entry)]);
   assert.equal(first.filter(Boolean).length,1);
   assert.equal(await store.claimAttempt(entry),false);
   await store.recordAttempt({...entry,status:'failed',error:'Transient provider error'});
-  const retried=await Promise.all([store.claimAttempt(entry),store.claimAttempt(entry)]);
+  assert.equal(await store.claimAttempt(entry),false);
+  const retry={...entry,attemptAt:'2099-10-07T08:15:00Z'};
+  const retried=await Promise.all([store.claimAttempt(retry),store.claimAttempt(retry)]);
   assert.equal(retried.filter(Boolean).length,1);
   await store.recordAttempt({...entry,status:'succeeded'});
   assert.equal(await store.claimAttempt(entry),false);
@@ -234,8 +239,8 @@ dbtest('provider claims serialize overlaps, retry failures once, and never recla
   const abandoned={...entry,provider:'gpt'};
   assert.equal(await store.claimAttempt(abandoned),true);
   assert.equal(await store.claimAttempt(abandoned),false);
-  await pool.query(`UPDATE "${schema}".attempts SET updated_at=now()-INTERVAL '7 minutes' WHERE run_id=$1 AND fixture_id=$2 AND provider=$3`,[run.id,match.id,'gpt']);
-  assert.equal(await store.claimAttempt(abandoned),true);
+  assert.equal(await store.claimAttempt({...abandoned,attemptAt:'2099-10-07T08:07:00Z'}),false);
+  assert.equal(await store.claimAttempt({...abandoned,attemptAt:'2099-10-07T08:15:00Z'}),true);
 });
 dbtest('daily refresh resolves a final score once and does not revive it with a late prediction',async()=>{
   await store.importSnapshot(baseline());
@@ -281,4 +286,197 @@ dbtest('failed provider attempts are retrievable without creating a prediction',
   assert.equal(state.attempts[0].error,'Provider unavailable');
   assert.equal(state.predictions.length,0);
   assert.deepEqual(state.snapshots[0].input,match);
+});
+
+dbtest('visitors see retained and missing forecasts after a failed provider refresh',async()=>{
+  await store.importSnapshot(baseline());
+  const refreshed={...match,home:{...home,points:6}};
+  await store.refreshFixtures({matches:[refreshed],raw:[],teams,source:'Official Fantasy Premier League',updatedAt:'2026-10-02T08:00:00Z'});
+  await predictFixtures(store,[refreshed],{jev:async()=>{throw new Error('Failure with a private credential');},openai:async()=>{throw new Error('Refused');}},async()=>{});
+  const live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.forecastStates.jev.availability,'retained');
+  assert.equal(live.forecastStates.jev.status,'failed');
+  assert.equal(live.forecastStates.openai.availability,'missing');
+  assert.equal(live.forecastStates.openai.status,'failed');
+  assert.equal(live.predictions.jev.generatedAt,prediction.generatedAt);
+  assert.equal(live.predictions.openai,undefined);
+  assert.match(forecastPanel(live,'jev',live.predictions.jev,live.forecastStates.jev),/Refresh failed.*Retaining the earlier forecast/);
+  assert.match(forecastPanel(live,'openai',null,live.forecastStates.openai),/No prediction available.*Refresh failed/s);
+  assert.ok(!JSON.stringify(live).includes('private credential'));
+});
+
+dbtest('the weekly cron records missing credentials as failures for both expected providers',async t=>{
+  const source=baseline();source.predictions={};
+  source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
+  await store.importSnapshot(source);
+  const saved=Object.fromEntries(['AI_GATEWAY_API_KEY','OPENAI_API_KEY','CRON_SECRET'].map(key=>[key,process.env[key]]));
+  try {
+    for(const key of Object.keys(saved))delete process.env[key];
+    t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-07T08:00:00Z')});
+    const stats=await response(predictionsHandler);
+    assert.equal(stats.failed,2);
+    assert.equal(stats.updated,0);
+    const live=(await response(fixturesHandler)).matches[0];
+    for(const provider of ['jev','openai']){
+      assert.equal(live.forecastStates[provider].status,'failed');
+      assert.equal(live.forecastStates[provider].availability,'missing');
+      assert.equal(live.predictions[provider],undefined);
+    }
+  } finally {
+    t.mock.timers.reset();
+    for(const [key,value]of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+  }
+});
+
+dbtest('weekly retries wait fifteen minutes, exhaust after three attempts and retain the older opinion',async()=>{
+  const source=baseline();
+  source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
+  await store.importSnapshot(source);
+  let calls=0;
+  const providers={jev:async()=>{calls++;throw new Error('Rate limit including a private credential');}};
+  assert.equal((await generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{})).failed,1);
+  assert.equal((await generateWeeklyPredictions(store,providers,'2099-10-07T08:14:59Z',async()=>{})).failed,0);
+  assert.equal(calls,1);
+  assert.equal((await generateWeeklyPredictions(store,providers,'2099-10-07T08:15:00Z',async()=>{})).failed,1);
+  assert.equal((await generateWeeklyPredictions(store,providers,'2099-10-07T08:30:00Z',async()=>{})).failed,1);
+  assert.equal((await generateWeeklyPredictions(store,providers,'2099-10-07T09:30:00Z',async()=>{})).failed,0);
+  assert.equal(calls,3);
+  const live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.forecastStates.jev.status,'exhausted');
+  assert.equal(live.forecastStates.jev.attemptCount,3);
+  assert.equal(live.forecastStates.jev.availability,'retained');
+  assert.equal(live.predictions.jev.generatedAt,prediction.generatedAt);
+  assert.match(forecastPanel(live,'jev',live.predictions.jev,live.forecastStates.jev),/Retries exhausted.*Retaining the earlier forecast/);
+  assert.ok(!JSON.stringify(live).includes('private credential'));
+});
+
+dbtest('the Thursday cutoff is visible without a write and the next cron persists expiry',async t=>{
+  const source=baseline();source.predictions={};
+  source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
+  await store.importSnapshot(source);
+  await generateWeeklyPredictions(store,{openai:async()=>{throw new Error('Timeout');}},'2099-10-07T08:00:00Z',async()=>{});
+  const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z');
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-08T08:00:00Z')});
+  const live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.forecastStates.openai.status,'expired');
+  assert.match(forecastPanel(live,'openai',null,live.forecastStates.openai),/Retry window expired/);
+  assert.equal((await store.getRun(run.id)).attempts[0].status,'failed');
+  let calls=0;
+  const stats=await generateWeeklyPredictions(store,{openai:async()=>{calls++;}},'2099-10-08T08:00:00Z',async()=>{});
+  assert.equal(stats.skipped,'outside weekly run window');
+  assert.equal(calls,0);
+  assert.equal((await store.getRun(run.id)).attempts[0].status,'expired');
+});
+
+dbtest('partial weekly success is visible immediately and only the failed provider retries to a fresh forecast',async()=>{
+  const source=baseline();source.predictions={};
+  source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
+  await store.importSnapshot(source);
+  let release,started;
+  const waiting=new Promise(resolve=>{release=resolve;}),openaiStarted=new Promise(resolve=>{started=resolve;});
+  const seen=[];
+  const job=generateWeeklyPredictions(store,{jev:async()=>({...prediction,generatedAt:'2099-10-07T08:00:00Z'}),
+    openai:async input=>{seen.push(structuredClone(input));started();await waiting;throw new Error('Temporary refusal');}},'2099-10-07T08:00:00Z',async()=>{});
+  await openaiStarted;
+  let live;
+  try {
+    for(let i=0;i<10;i++){live=(await response(fixturesHandler)).matches[0];if(live.predictions.jev)break;}
+    assert.equal(live.forecastStates.jev.status,'succeeded');
+    assert.equal(live.forecastStates.jev.availability,'fresh');
+    assert.equal(live.forecastStates.openai.status,'started');
+    assert.equal(live.predictions.openai,undefined);
+  } finally {release();await job;}
+  live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.forecastStates.openai.status,'failed');
+  assert.match(forecastPanel(live,'openai',null,live.forecastStates.openai),/Refresh failed/);
+  let successfulProviderCalls=0;
+  const retry=await generateWeeklyPredictions(store,{jev:async()=>{successfulProviderCalls++;return prediction;},
+    openai:async input=>{seen.push(structuredClone(input));return {...prediction,model:'gpt-6-luna',generatedAt:'2099-10-07T08:15:00Z'};}},'2099-10-07T08:15:00Z',async()=>{});
+  assert.equal(retry.updated,1);
+  assert.equal(successfulProviderCalls,0);
+  assert.deepEqual(seen,[source.fixtures.matches[0],source.fixtures.matches[0]]);
+  live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.forecastStates.openai.status,'succeeded');
+  assert.equal(live.forecastStates.openai.availability,'fresh');
+  assert.equal(live.forecastStates.openai.attemptCount,2);
+  assert.match(forecastPanel(live,'openai',live.predictions.openai,live.forecastStates.openai),/2099-10-07T08:15:00Z/);
+  assert.ok(!forecastPanel(live,'openai',live.predictions.openai,live.forecastStates.openai).includes('Refresh failed'));
+});
+
+dbtest('a recovered claim rejects the abandoned worker result and failure',async()=>{
+  await store.importSnapshot(baseline());
+  const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z','2099-10-07T08:00:00Z');
+  await store.saveSnapshot(run.id,match.id,match);
+  const first={runId:run.id,fixtureId:match.id,provider:'openai',claimUntil:'2099-10-08T08:00:00Z',attemptAt:'2099-10-07T08:00:00Z',claimToken:randomUUID(),matchSignature:JSON.stringify(match),prediction};
+  assert.equal(await store.claimAttempt(first),true);
+  const replacement={...first,attemptAt:'2099-10-07T08:15:00Z',claimToken:randomUUID(),prediction:{...prediction,score:[3,0]}};
+  assert.equal(await store.claimAttempt(replacement),true);
+  assert.equal(await store.savePrediction(first),false);
+  await store.recordAttempt({...first,status:'failed',error:'Late abandoned failure'});
+  assert.equal((await store.getRun(run.id)).attempts[0].status,'started');
+  assert.equal(await store.savePrediction(replacement),true);
+  const saved=await store.getRun(run.id);
+  assert.equal(saved.attempts[0].status,'succeeded');
+  assert.equal(saved.attempts[0].attemptCount,2);
+  assert.equal(saved.predictions.length,1);
+  assert.deepEqual(saved.predictions[0].data.score,[3,0]);
+});
+
+dbtest('an additive retry upgrade preserves old forecasts and does not reset new attempt budgets',async()=>{
+  await store.importSnapshot(baseline());
+  const legacy=await save(match,prediction,'weekly:2026-10-07T08:00:00.000Z');
+  await store.recordAttempt({runId:legacy.run.id,fixtureId:match.id,provider:'jev',status:'failed'});
+  // Recreate the old attempts table shape as an upgrade fixture.
+  await pool.query(`ALTER TABLE "${schema}".attempts DROP COLUMN attempt_count,DROP COLUMN next_attempt_at,DROP COLUMN claim_token;
+    ALTER TABLE "${schema}".attempts DROP CONSTRAINT attempts_status_check;
+    ALTER TABLE "${schema}".attempts ADD CONSTRAINT attempts_status_check CHECK(status IN ('started','succeeded','failed'));
+    DELETE FROM "${schema}".metadata WHERE key='retry_schema_v1'`);
+  const report=await store.migrationReport();
+  assert.equal((await store.upgradeRetries()).verified,true);
+  assert.deepEqual(await store.migrationReport(),report);
+  assert.deepEqual((await store.getPredictions())[11].prediction,prediction);
+  assert.deepEqual((await store.getRun(legacy.run.id)).snapshots[0].input,match);
+  assert.ok(['expired','exhausted'].includes((await store.getRun(legacy.run.id)).attempts[0].status));
+  const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z','2099-10-07T08:00:00Z');
+  await store.saveSnapshot(run.id,match.id,match);
+  const entry={runId:run.id,fixtureId:match.id,provider:'openai',claimUntil:'2099-10-08T08:00:00Z',attemptAt:'2099-10-07T08:00:00Z',claimToken:randomUUID()};
+  assert.equal(await store.claimAttempt(entry),true);
+  await store.recordAttempt({...entry,status:'failed'});
+  await store.upgradeRetries();
+  assert.equal((await store.getRun(run.id)).attempts[0].status,'failed');
+  assert.equal((await store.getRun(run.id)).attempts[0].attemptCount,1);
+  assert.equal(await store.claimAttempt({...entry,attemptAt:'2099-10-07T08:14:59Z'}),false);
+  assert.equal(await store.claimAttempt({...entry,attemptAt:'2099-10-07T08:15:00Z',claimToken:randomUUID()}),true);
+  assert.equal((await store.getRun(run.id)).attempts[0].attemptCount,2);
+});
+
+dbtest('a provider never reached before the deadline has an expired missing state',async t=>{
+  await store.importSnapshot(baseline());
+  const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z','2099-10-07T08:00:00Z');
+  await store.saveSnapshot(run.id,match.id,match);
+  await store.settleAttempts('2099-10-08T08:00:00Z');
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-08T08:00:00Z')});
+  const live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.forecastStates.openai.status,'expired');
+  assert.equal(live.forecastStates.openai.availability,'missing');
+  assert.equal(live.forecastStates.openai.attemptCount,0);
+  assert.equal((await store.getRun(run.id)).predictions.length,0);
+});
+
+dbtest('a slow failed evaluation still leaves a full fifteen-minute interval before retry',async()=>{
+  const source=baseline();source.predictions={};
+  source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
+  await store.importSnapshot(source);
+  let calls=0,clockCalls=0;
+  const provider=async()=>{calls++;throw new Error('Timeout');};
+  await runWeekly(store,{openai:provider},'2099-10-07T08:00:00Z',async()=>{},()=>new Date(clockCalls++===0?'2099-10-07T08:00:00Z':'2099-10-07T08:02:00Z'));
+  await generateWeeklyPredictions(store,{openai:provider},'2099-10-07T08:15:00Z',async()=>{});
+  assert.equal(calls,1);
+  await generateWeeklyPredictions(store,{openai:provider},'2099-10-07T08:17:00Z',async()=>{});
+  assert.equal(calls,2);
 });

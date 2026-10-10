@@ -37,6 +37,22 @@ The commands below load `.env.local`. Use that file only for the environment bei
 
 If any validation fails, keep the backend set to Blob and do not resume the cutover. If Blob writers ran after the export, the snapshot is no longer a valid cutover baseline. Export again and import into a fresh Neon branch or empty application schema, rather than forcing an overwrite. Do not delete a schema containing application writes.
 
+## Additive retry schema upgrade
+
+Existing validated Neon schemas need the retry upgrade before the issue #4 application version is deployed. New `setup` commands include it. API reads do not initialize or alter schemas.
+
+1. Pause prediction and fixture writers for the target environment, including manual calls, and wait at least six minutes for in-flight functions to finish. Keep the previous application version serving reads.
+2. Check the target `DATABASE_SCHEMA` and private database connection. Use the new code to run the transaction below against that schema:
+
+   ```sh
+   node --env-file=.env.local scripts/persistence.mjs upgrade-retries
+   ```
+
+   Review [the SQL](../db/upgrade-retries.sql) before running it. It adds attempt counts, next eligibility timestamps, claim tokens and exhausted/expired states. It changes no fixtures, evidence snapshots, successful forecasts, revisions, results or import validation markers. Existing unfinished attempts have unknown total request counts, so the upgrade closes their budgets conservatively. They become expired if their weekly cutoff passed, otherwise exhausted. Counts of zero on legacy rows mean their counts were not recorded. The next weekly run receives a new budget. Repeating the upgrade does not reset counters or close newly recorded attempts.
+3. Require the command's `retrySchema.verified` result, then deploy the new version. Verify both provider states and older generation dates through `/api/fixtures` and the fixture cards. Resume the jobs only after verification.
+
+The schema change is additive. The previous application can still read successful forecasts, but its prediction writer does not enforce the new budget. For an application rollback, keep prediction writers paused until a version that enforces the budget is serving them. Retain the added columns and states; do not remove application history or rerun the original import.
+
 ## Rollback
 
 Before Neon receives new writes, rollback means setting `PERSISTENCE_BACKEND=blob`, redeploying and resuming cron jobs. The original Blob files have not been changed by the import.

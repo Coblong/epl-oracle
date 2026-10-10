@@ -45,6 +45,16 @@ test('HTTP access failure rejects the adapter without creating a forecast',async
     await assert.rejects(predictDecision(match),/403/);
   }finally{globalThis.fetch=original;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
+test('a rate limit is one provider attempt and does not retry inside the adapter',async()=>{
+  const original=globalThis.fetch,key=process.env.OPENAI_API_KEY;
+  let calls=0;
+  try {
+    process.env.OPENAI_API_KEY='test-only-key';
+    globalThis.fetch=async()=>{calls++;if(calls>1)throw new Error('A hidden retry occurred');return new Response('{}',{status:429});};
+    await assert.rejects(predictDecision(match),/429/);
+    assert.equal(calls,1);
+  } finally {globalThis.fetch=original;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
+});
 test('forecast panels expose separate outcomes, scores, timestamps and missing opinions safely',()=>{
   const p={...parseDecision(response()),generatedAt:'2026-10-09T09:00:00Z',model:'<script>bad</script>',stale:true};
   const html=forecastPanel(match,'openai',p);
@@ -61,4 +71,7 @@ test('forecast notice only claims automatic updates for enabled providers',()=>{
   assert.match(forecastNotice({jev:false,openai:true}).text,/OpenAI Decisions forecasts/);
   assert.match(forecastNotice({jev:false,openai:true}).text,/Jev is currently unavailable/);
   assert.match(forecastNotice({jev:true,openai:true}).text,/Jev and OpenAI Decisions forecasts/);
+  assert.match(forecastNotice({jev:true,openai:true}).text,/next ten days/);
+  assert.match(forecastNotice({jev:true,openai:true}).text,/Wednesday.*09:00.*09:59.*London/);
+  assert.ok(!forecastNotice({jev:true,openai:true}).text.includes('each day'));
 });
