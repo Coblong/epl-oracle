@@ -2,7 +2,10 @@
   "regions": ["lhr1"],
   "crons": [
     {"path": "/api/cron/fixtures", "schedule": "30 5 * * *"},
-    {"path": "/api/cron/predictions", "schedule": "0 6 * * *"}
+    {"path": "/api/cron/predictions", "schedule": "0 8 * * 3"},
+    {"path": "/api/cron/predictions", "schedule": "0 9 * * 3"},
+    {"path": "/api/cron/predictions", "schedule": "0 7 * * 4"},
+    {"path": "/api/cron/predictions", "schedule": "0 8 * * 4"}
   ],
   "functions": {
     "api/cron/fixtures.mjs": {"maxDuration": 60},

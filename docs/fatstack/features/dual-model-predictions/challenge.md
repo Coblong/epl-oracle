@@ -23,7 +23,7 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 - Show each provider's latest successful forecast and its timestamp.
 - Preserve previous prediction versions. Score the latest successful prediction made before kickoff for each provider.
 - Retain an older successful prediction when a provider refresh fails. Show its date and the failed refresh explicitly.
-- Save successful provider predictions immediately and retry failures within a bounded Wednesday morning window using that morning's saved input. A retry must not replace an already successful prediction for that run.
+- Save successful provider predictions immediately and retry failures before the weekly run's Thursday 09:00 Europe/London recovery deadline, exclusive, using that run's saved input. A retry must not replace an already successful prediction for that run.
 - Continue daily fixture and actual-result updates independently of weekly prediction generation.
 - Keep outcome and exact-score predictions separate, even when they disagree. Evaluate and highlight correctness separately.
 - Provide Upcoming and Results views in the fixture section. Results show actual scores alongside both final forecasts.
@@ -44,8 +44,7 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 
 ## Open questions
 
-- Define the exact ten-day boundary, including whether the final instant is inclusive and whether days mean elapsed hours or London calendar days.
-- Define the Wednesday morning retry cutoff, backoff, and recovery behaviour if the scheduled run never starts.
+- Define retry backoff.
 - Determine how to show feed states for postponements and cancellations when the official fixture feed does not explicitly provide those distinctions.
 - Determine the treatment of a postponed fixture whose prior kickoff has already passed, including which prediction deadline applies after rescheduling.
 - Define the Brier score convention and denominator consistently for full history and shared-fixture comparisons.

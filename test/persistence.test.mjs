@@ -7,6 +7,7 @@ import {closeDatabase} from '../lib/store.mjs';
 import fixturesHandler from '../api/fixtures.mjs';
 import resultsHandler from '../api/results.mjs';
 import {predictFixtures} from '../lib/prediction-job.mjs';
+import {generateWeeklyPredictions} from '../lib/weekly-predictions.mjs';
 
 const enabled=!!process.env.TEST_DATABASE_URL;
 const schema='epl_oracle_test_'+randomUUID().replaceAll('-','');
@@ -160,6 +161,81 @@ dbtest('overlapping prediction writes for different fixtures do not lose updates
   const predictions=await store.getPredictions();
   assert.equal(predictions[11].prediction.outcome,'home');
   assert.equal(predictions[12].prediction.outcome,'away');
+});
+dbtest('overlapping weekly workers share one snapshot and claim each provider once',async()=>{
+  const source=baseline();
+  source.predictions={};
+  source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
+  await store.importSnapshot(source);
+  let calls=0;
+  const providers={jev:async()=>{calls++;await new Promise(resolve=>setTimeout(resolve,25));return prediction;},
+    openai:async()=>{calls++;await new Promise(resolve=>setTimeout(resolve,25));return {...prediction,model:'gpt-6-luna'};}};
+  const now='2099-10-07T08:00:00Z';
+  const results=await Promise.all([
+    generateWeeklyPredictions(store,providers,now),
+    generateWeeklyPredictions(store,providers,now),
+  ]);
+  assert.equal(calls,2);
+  assert.equal(results.reduce((sum,result)=>sum+result.updated,0),2);
+  const run=(await pool.query(`SELECT id FROM "${schema}".runs WHERE run_key LIKE 'weekly:%'`)).rows[0];
+  const saved=await store.getRun(run.id);
+  assert.equal(saved.snapshots.length,1);
+  assert.equal(saved.predictions.length,2);
+  assert.equal(saved.attempts.length,2);
+  assert.ok(saved.attempts.every(attempt=>attempt.status==='succeeded'));
+});
+dbtest('a failed weekly forecast retries from its frozen snapshot only before Thursday 09 London',async()=>{
+  const source=baseline();
+  source.predictions={};
+  source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
+  await store.importSnapshot(source);
+  const seen=[];
+  let calls=0;
+  const providers={jev:async input=>{
+    seen.push(structuredClone(input));
+    if(calls++===0){input.home.name='Changed in the failed call';throw new Error('Transient provider error');}
+    return prediction;
+  }};
+  const first=await generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{});
+  assert.deepEqual(first,{targeted:1,updated:0,failed:1});
+  const retry=await generateWeeklyPredictions(store,providers,'2099-10-08T07:59:59Z',async()=>{});
+  assert.deepEqual(retry,{targeted:1,updated:1,failed:0});
+  assert.deepEqual(seen,[source.fixtures.matches[0],source.fixtures.matches[0]]);
+  const run=(await pool.query(`SELECT id FROM "${schema}".runs WHERE run_key LIKE 'weekly:%'`)).rows[0];
+  const saved=await store.getRun(run.id);
+  assert.equal(saved.snapshots.length,1);
+  assert.deepEqual(saved.snapshots[0].input,source.fixtures.matches[0]);
+  assert.equal(saved.predictions.length,1);
+  assert.equal(saved.attempts[0].status,'succeeded');
+  const expired=await generateWeeklyPredictions(store,{jev:async()=>{throw new Error('The recovery window is closed');}},'2099-10-08T08:00:00Z');
+  assert.deepEqual(expired,{targeted:0,updated:0,failed:0,skipped:'outside weekly run window'});
+});
+dbtest('provider claims serialize overlaps, retry failures once, and never reclaim success',async()=>{
+  await store.importSnapshot(baseline());
+  const run=await store.beginRun('weekly-claim-recovery','2099-10-07T08:00:00Z');
+  await store.saveSnapshot(run.id,match.id,match);
+  const claimUntil='2099-10-08T08:00:00Z';
+  const entry={runId:run.id,fixtureId:match.id,provider:'jev',claimUntil};
+  const first=await Promise.all([store.claimAttempt(entry),store.claimAttempt(entry)]);
+  assert.equal(first.filter(Boolean).length,1);
+  assert.equal(await store.claimAttempt(entry),false);
+  await store.recordAttempt({...entry,status:'failed',error:'Transient provider error'});
+  const retried=await Promise.all([store.claimAttempt(entry),store.claimAttempt(entry)]);
+  assert.equal(retried.filter(Boolean).length,1);
+  await store.recordAttempt({...entry,status:'succeeded'});
+  assert.equal(await store.claimAttempt(entry),false);
+
+  const afterCutoff={...entry,provider:'openai',claimUntil:'2000-01-01T00:00:00Z'};
+  await store.recordAttempt({...afterCutoff,status:'failed',error:'Missed retry window'});
+  assert.equal(await store.claimAttempt(afterCutoff),false);
+
+  const abandoned={...entry,provider:'gpt'};
+  assert.equal(await store.claimAttempt(abandoned),true);
+  assert.equal(await store.claimAttempt(abandoned),false);
+  await pool.query(`UPDATE "${schema}".attempts SET updated_at=now()-INTERVAL '7 minutes' WHERE run_id=$1 AND fixture_id=$2 AND provider=$3`,[run.id,match.id,'gpt']);
+  assert.equal(await store.claimAttempt(abandoned),true);
 });
 dbtest('daily refresh resolves a final score once and does not revive it with a late prediction',async()=>{
   await store.importSnapshot(baseline());
