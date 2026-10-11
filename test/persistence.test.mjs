@@ -6,6 +6,7 @@ import {createPostgresStore} from '../lib/postgres-store.mjs';
 import {closeDatabase} from '../lib/store.mjs';
 import fixturesHandler from '../api/fixtures.mjs';
 import resultsHandler from '../api/results.mjs';
+import fixturesCronHandler from '../api/cron/fixtures.mjs';
 import predictionsHandler from '../api/cron/predictions.mjs';
 import {predictFixtures} from '../lib/prediction-job.mjs';
 import {generateWeeklyPredictions as runWeekly} from '../lib/weekly-predictions.mjs';
@@ -350,6 +351,72 @@ dbtest('daily refresh settles provisional final scores, retains both pre-kickoff
   assert.equal(result.forecasts.jev.correctScore,false);
   assert.equal(result.forecasts.openai.correctScore,false);
   assert.equal(page.results.some(item=>item.id===72),false);
+});
+
+dbtest('fixture cron uses persisted team references when bootstrap-static is forbidden and fails closed on unknown teams',async t=>{
+  const kickoff='2026-10-10T11:00:00Z';
+  const fixture={...match,id:81,kickoff};
+  const source=baseline();source.predictions={};source.results=[];source.fixtures.matches=[fixture];
+  await store.importSnapshot(source);
+  for(const provider of ['jev','openai']){
+    const generatedAt=`2026-10-10T10:0${provider==='jev'?'0':'5'}:00Z`;
+    const run=await store.beginRun(`feed-recovery-${provider}`,generatedAt);
+    await store.saveSnapshot(run.id,fixture.id,fixture);
+    await store.recordAttempt({runId:run.id,fixtureId:fixture.id,provider,status:'started',attemptAt:generatedAt});
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:fixture.id,provider,matchSignature:JSON.stringify(fixture),prediction:{...prediction,generatedAt,model:provider},completedAt:generatedAt}),true);
+  }
+  const raw=[{id:81,event:2,team_h:1,team_a:2,kickoff_time:kickoff,finished:false,finished_provisional:true,started:true,team_h_score:2,team_a_score:1}];
+  const originalFetch=global.fetch;
+  const invoke=async({bootstrapStatus=403,fixtureStatus=200,fixtures=raw,bootstrapTeams=teams,bootstrapDelay=0}={})=>{
+    global.fetch=async url=>String(url).endsWith('/fixtures/')
+      ? new Response(JSON.stringify(fixtures),{status:fixtureStatus,headers:{'content-type':'application/json'}})
+      : (await new Promise(resolve=>setTimeout(resolve,bootstrapDelay)),new Response(JSON.stringify({teams:bootstrapTeams}),{status:bootstrapStatus,headers:{'content-type':'application/json'}}));
+    let body;
+    const res={setHeader(){},end(text){body=JSON.parse(text);}};
+    await fixturesCronHandler({headers:{}},res);
+    return {status:res.statusCode,body};
+  };
+  t.after(()=>{global.fetch=originalFetch;});
+
+  const recovered=await invoke();
+  assert.equal(recovered.status,200);
+  assert.equal(recovered.body.resolved,1);
+  let page=await store.getResultsPage();
+  assert.deepEqual(page.results.find(item=>item.id===81).actualScore,[2,1]);
+  assert.equal(page.results.find(item=>item.id===81).forecasts.jev.correctScore,true);
+  assert.equal(page.results.find(item=>item.id===81).forecasts.openai.correctScore,true);
+  assert.equal((await pool.query(`SELECT 1 FROM "${schema}".metadata WHERE key='team_catalog'`)).rowCount,0);
+
+  const verified=await invoke({bootstrapStatus:200,bootstrapDelay:40});
+  assert.equal(verified.status,200);
+  const catalog=(await pool.query(`SELECT value FROM "${schema}".metadata WHERE key='team_catalog'`)).rows[0].value;
+  assert.deepEqual(catalog.teams.map(team=>team.id).sort((a,b)=>a-b),[1,2]);
+  const fixtureMetadata=(await pool.query(`SELECT value FROM "${schema}".metadata WHERE key='fixtures'`)).rows[0].value;
+  assert.ok(Date.parse(fixtureMetadata.updatedAt)<Date.parse(catalog.updatedAt));
+
+  await pool.query(`CREATE FUNCTION "${schema}".reject_fixture_metadata() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF NEW.key='fixtures' THEN RAISE EXCEPTION 'forced test rollback'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER reject_fixture_metadata BEFORE INSERT OR UPDATE ON "${schema}".metadata
+      FOR EACH ROW EXECUTE FUNCTION "${schema}".reject_fixture_metadata()`);
+  const failedRefresh=await invoke({bootstrapStatus:200,bootstrapTeams:teams.map(team=>({...team,short_name:'NEW'}))});
+  assert.equal(failedRefresh.status,502);
+  await pool.query(`DROP TRIGGER reject_fixture_metadata ON "${schema}".metadata; DROP FUNCTION "${schema}".reject_fixture_metadata()`);
+  const afterRollback=(await pool.query(`SELECT value FROM "${schema}".metadata WHERE key='team_catalog'`)).rows[0].value;
+  assert.deepEqual(afterRollback,catalog);
+
+  const reused=await invoke();
+  assert.equal(reused.status,200);
+  const afterFallback=(await pool.query(`SELECT value FROM "${schema}".metadata WHERE key='team_catalog'`)).rows[0].value;
+  assert.deepEqual(afterFallback,catalog);
+
+  const unknown=await invoke({fixtures:[{...raw[0],id:82,team_h:999}]});
+  assert.equal(unknown.status,502);
+  page=await store.getResultsPage();
+  assert.equal(page.results.some(item=>item.id===82),false);
+  const unavailable=await invoke({fixtureStatus:403});
+  assert.equal(unavailable.status,502);
+  page=await store.getResultsPage();
+  assert.equal(page.results.length,1);
 });
 
 dbtest('the Results API paginates the current season in groups of twenty',async()=>{
