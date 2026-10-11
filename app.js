@@ -1,6 +1,6 @@
 import {forecastPanel,forecastNotice} from './forecast-view.mjs';
 const $=s=>document.querySelector(s);
-let matches=[], limit=30, resultsPage=0,resultsTotal=0;
+let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null;
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(date,options)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',...options}).format(new Date(date));
 const dateKey=m=>m.kickoff?fmt(m.kickoff,{year:'numeric',month:'2-digit',day:'2-digit'}):'TBC';
@@ -18,30 +18,46 @@ async function request(url){const r=await fetch(url);const data=await r.json();i
 async function load(){$('#refresh').disabled=true;notice('Fetching official Premier League fixtures…');try{const d=await request('/api/fixtures');matches=d.matches;const previous=$('#gameweek').value;$('#gameweek').innerHTML='<option value="all">All gameweeks</option>'+[...new Set(matches.map(m=>m.gameweek).filter(x=>x!=null))].sort((a,b)=>a-b).map(g=>`<option value="${g}">Gameweek ${g}</option>`).join('');$('#gameweek').value=[...$('#gameweek').options].some(x=>x.value===previous)?previous:'all';$('#fixture-count').textContent=matches.length;$('#updated').textContent=`Updated ${fmt(d.updatedAt,{hour:'2-digit',minute:'2-digit'})} · ${fmt(d.updatedAt,{day:'numeric',month:'short'})}`;render();const message=forecastNotice(d.providersConfigured??{jev:d.configured,openai:false});notice(message.text,message.error);}catch(e){notice(e.message,true);if(!matches.length)$('#matches').innerHTML='<div class="empty">Fixtures are unavailable right now. Use Refresh to try again.</div>';}finally{$('#refresh').disabled=false;}}
 function resultRow(r){
   const forecasts=['jev','openai'].map(provider=>{
-    const entry=r.forecasts?.[provider],label=provider==='openai'?'OpenAI':'Jev';
-    if(!entry)return `<div class="result-forecast"><strong>${label}</strong><span class="missing-forecast">No pre-match forecast</span></div>`;
-    const p=entry.prediction,picked=p.outcome==='draw'?'Draw':`${p.outcome==='home'?r.home.name:r.away.name} win`;
-    return `<div class="result-forecast"><strong>${label}</strong><span>Outcome: ${escape(picked)} · Score: ${p.score.join(':')}</span><span class="badge ${entry.correctOutcome?'badge-correct':'badge-wrong'}">${entry.correctOutcome?'✓':'✗'} outcome</span><span class="badge ${entry.correctScore?'badge-correct':'badge-wrong'}">${entry.correctScore?'✓':'✗'} exact score</span></div>`;
+    const entry=r.forecasts?.[provider];
+    if(!entry)return '<td class="missing-forecast">No pre-match forecast</td>';
+    const p=entry.prediction,picked=p.outcome==='draw'?'Draw':p.outcome==='home'?'Home win':'Away win';
+    const outcomeLabel=`${picked}, ${entry.correctOutcome?'correct':'incorrect'} result prediction`;
+    const scoreLabel=`${p.score.join(':')}, ${entry.correctScore?'correct':'incorrect'} exact score prediction`;
+    return `<td class="result-prediction"><span class="badge ${entry.correctOutcome?'badge-correct':'badge-wrong'}" aria-label="${escape(outcomeLabel)}" title="${escape(outcomeLabel)}">${picked} ${entry.correctOutcome?'✓':'✗'}</span> <span class="badge ${entry.correctScore?'badge-correct':'badge-wrong'}" aria-label="${escape(scoreLabel)}" title="${escape(scoreLabel)}">${p.score.join(':')} ${entry.correctScore?'✓':'✗'}</span></td>`;
   }).join('');
   const actual=r.status==='cancelled'?'Cancelled':r.actualScore.join(' : ');
-  return `<article class="result-row"><div class="result-heading"><div class="result-teams"><span>${escape(r.home.name)}</span><span class="result-score">${actual}</span><span>${escape(r.away.name)}</span></div><span class="result-date">${r.kickoff?fmt(r.kickoff,{weekday:'short',day:'numeric',month:'short',year:'numeric'}):'Date to be confirmed'}</span></div><div class="result-forecasts">${forecasts}</div></article>`;
+  const date=r.kickoff?fmt(r.kickoff,{day:'numeric',month:'short',year:'numeric'}):'TBC';
+  const kickoff=r.kickoff?fmt(r.kickoff,{hour:'2-digit',minute:'2-digit'}):'TBC';
+  return `<tr><td>${date}</td><td>${kickoff}</td><th scope="row">${escape(r.home.name)} vs ${escape(r.away.name)}</th><td class="result-actual">${actual}</td>${forecasts}</tr>`;
+}
+function renderScoreboard(){
+  if(!trackRecord)return;
+  const shared=$('#scoreboard-scope').value==='shared';
+  const summaries=shared?trackRecord.sharedComparison?.providerSummaries:trackRecord.providerSummaries;
+  for(const provider of ['jev','openai']){
+    const summary=summaries?.[provider];
+    $(`#tr-${provider}-fixtures`).textContent=summary?.resolved ?? '—';
+    $(`#tr-${provider}-result`).textContent=summary?.resolved?`${Math.round(summary.outcomeAccuracy*100)}%`:'—';
+    $(`#tr-${provider}-scores`).textContent=summary?.resolved?`${Math.round(summary.scoreAccuracy*100)}%`:'—';
+    $(`#tr-${provider}-result-count`).textContent=summary?`${summary.outcomeCorrect} of ${summary.resolved}`:'';
+    $(`#tr-${provider}-score-count`).textContent=summary?`${summary.scoreCorrect} of ${summary.resolved}`:'';
+    $(`#tr-${provider}-brier`).textContent=Number.isFinite(summary?.brierScore)?summary.brierScore.toFixed(3):'—';
+    $(`#tr-${provider}-brier-count`).textContent=summary?`${summary.brierSampleCount} forecasts`:'';
+  }
+  $('#scoreboard-caption').textContent=shared?`${trackRecord.sharedComparison?.resolved ?? 0} shared matches predicted by both providers`:'All retained match predictions';
+  $('#track-notice').textContent=shared?'Only completed matches with eligible pre-match predictions from both providers.':'Each provider’s full record of completed matches with eligible pre-match predictions.';
 }
 async function loadResults(page=1,append=false){
   try{
     const d=await request(`/api/results?page=${page}`);
     resultsPage=d.page;resultsTotal=d.total;
-    for(const provider of ['jev','openai']){
-      const summary=d.providerSummaries?.[provider];
-      $(`#tr-${provider}-fixtures`).textContent=summary?.resolved ?? '—';
-      $(`#tr-${provider}-result`).textContent=summary?.resolved ? `${Math.round(summary.outcomeAccuracy*100)}%` : '—';
-      $(`#tr-${provider}-scores`).textContent=summary?.resolved ? `${Math.round(summary.scoreAccuracy*100)}%` : '—';
-    }
-    $('#track-notice').textContent='Completed fixtures with a pre-match prediction · Result and exact score accuracy are measured separately.';
+    trackRecord={providerSummaries:d.providerSummaries,sharedComparison:d.sharedComparison};
+    renderScoreboard();
     $('#track-notice').classList.remove('error');
     $('#results-notice').classList.remove('error');
     if(!append)$('#results-list').innerHTML='';
     if(d.results.length)$('#results-list').insertAdjacentHTML('beforeend',d.results.map(resultRow).join(''));
-    else if(!append)$('#results-list').innerHTML='<div class="empty">No fixtures have finished yet this season.</div>';
+    else if(!append)$('#results-list').innerHTML='<tr><td colspan="6" class="empty">No fixtures have finished yet this season.</td></tr>';
     $('#results-notice').textContent=resultsTotal?`Showing ${Math.min(resultsTotal,resultsPage*d.pageSize)} of ${resultsTotal} fixtures.`:'No completed fixtures.';
     $('#results-load-more').hidden=!d.hasMore;
   }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');}
@@ -49,5 +65,6 @@ async function loadResults(page=1,append=false){
 function showView(view){$('#upcoming-view').hidden=view!=='upcoming';$('#results-view').hidden=view!=='results';$('#view-upcoming').setAttribute('aria-pressed',String(view==='upcoming'));$('#view-results').setAttribute('aria-pressed',String(view==='results'));$('#fixture-title').firstChild.textContent=view==='upcoming'?'Upcoming fixtures':'Results';$('#shown-count').hidden=view!=='upcoming';}
 $('#view-upcoming').addEventListener('click',()=>showView('upcoming'));$('#view-results').addEventListener('click',()=>showView('results'));
 $('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').addEventListener('input',()=>{limit=30;render();});$('#load-more').addEventListener('click',()=>{limit+=30;render();});$('#refresh').addEventListener('click',()=>load());
+$('#scoreboard-scope').addEventListener('change',renderScoreboard);
 $('#results-load-more').addEventListener('click',()=>loadResults(resultsPage+1,true));
 load();loadResults();
