@@ -44,7 +44,8 @@ function renderScoreboard(){
     $(`#tr-${provider}-brier`).textContent=Number.isFinite(summary?.brierScore)?summary.brierScore.toFixed(3):'—';
     $(`#tr-${provider}-brier-count`).textContent=summary?`${summary.brierSampleCount} forecasts`:'';
   }
-  $('#scoreboard-caption').textContent=shared?`${trackRecord.sharedComparison?.resolved ?? 0} shared matches predicted by both providers`:'All retained match predictions';
+  $('#scoreboard-caption').hidden=!shared;
+  $('#scoreboard-caption').textContent=shared?`${trackRecord.sharedComparison?.resolved ?? 0} shared matches predicted by both providers`:'';
   $('#track-notice').textContent=shared?'Only completed matches with eligible pre-match predictions from both providers.':'Each provider’s full record of completed matches with eligible pre-match predictions.';
 }
 async function loadResults(page=1,append=false){
@@ -62,7 +63,7 @@ async function loadResults(page=1,append=false){
     $('#results-load-more').hidden=!d.hasMore;
   }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');}
 }
-function showView(view){$('#upcoming-view').hidden=view!=='upcoming';$('#results-view').hidden=view!=='results';$('#view-upcoming').setAttribute('aria-pressed',String(view==='upcoming'));$('#view-results').setAttribute('aria-pressed',String(view==='results'));$('#fixture-title').firstChild.textContent=view==='upcoming'?'Upcoming fixtures':'Results';$('#shown-count').hidden=view!=='upcoming';}
+function showView(view){$('#upcoming-view').hidden=view!=='upcoming';$('#results-view').hidden=view!=='results';$('#view-upcoming').setAttribute('aria-pressed',String(view==='upcoming'));$('#view-results').setAttribute('aria-pressed',String(view==='results'));$('#fixture-title').firstChild.textContent=view==='upcoming'?'Predictions':'Results';$('#shown-count').hidden=view!=='upcoming';}
 $('#view-upcoming').addEventListener('click',()=>showView('upcoming'));$('#view-results').addEventListener('click',()=>showView('results'));
 $('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').addEventListener('input',()=>{limit=30;render();});$('#load-more').addEventListener('click',()=>{limit+=30;render();});$('#refresh').addEventListener('click',()=>load());
 $('#scoreboard-scope').addEventListener('change',renderScoreboard);
