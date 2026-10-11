@@ -30,7 +30,7 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 - Apply later official score corrections to the stored result and recalculate both providers' correctness from their eligible forecasts.
 - If the official feed removes a kickoff date, retain the fixture as awaiting rescheduling. Do not infer cancellation from a missing fixture or date. Exclude a cancelled fixture from accuracy totals only when the feed explicitly marks it cancelled.
 - The new Results view uses Neon data going forward. Do not import or backfill Blob results or fabricate historical forecasts; the existing Jev track-record rows can remain until issue #6.
-- Keep outcome and exact-score predictions separate, even when they disagree. Evaluate and highlight correctness separately.
+- Prioritize result predictions and show a consistent match narrative. Ask each provider for score probabilities, derive the most likely result by aggregation, then choose the most likely score within that result. This intentionally may differ from the globally most likely score. Preserve older forecasts and evaluate result and exact-score correctness separately. (revised 11 October 2026, issue #17)
 - Provide Upcoming and Results views in the fixture section. Results show actual scores alongside both final forecasts.
 - Extend the aggregate track record to both providers, including sample counts, outcome accuracy, exact-score accuracy, and Brier score for outcome probabilities.
 - Show each provider's full history and a comparison restricted to fixtures both providers predicted. Existing Jev history remains part of its full history.
@@ -42,7 +42,7 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 ## Assumptions
 
 - Continue using current-season statistics and the five most recent completed matches as forecast evidence. Adding injury, lineup, or betting data is outside this addition.
-- Keep the existing home/draw/away question and exact-score choices of zero to six goals per team for both providers.
+- Use one score choice question covering all 49 zero-to-six scorelines for both providers. Tie-breaking and distribution validation are implementation defaults documented in README.md.
 - Initially use `gpt-6-luna` for OpenAI Decisions, subject to verification during implementation, and label the provider and actual model used.
 - Fixtures outside the prediction window can remain visible with a pending-prediction state.
 - Use fixtures, prediction runs, predictions, and attempts as the initial storage concepts. The final database schema will be specified during requirements and implementation.
@@ -62,7 +62,7 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 - One provider succeeds and the other fails: persist the success, retry only the failed provider using the saved input, and show any remaining missing or older forecast explicitly. (confirmed)
 - A failed refresh has an older successful forecast: retain it with its timestamp and failed-refresh status. (confirmed)
 - A provider fails without any previous forecast: show the missing forecast explicitly and exclude it from that provider's resolved prediction count. (assumed)
-- Outcome and scoreline disagree: reject the provider response and use scheduled retries. Both providers must return consistent forecasts. Previously recorded predictions remain unchanged. (revised 10 October 2026)
+- The globally most likely score disagrees with the highest-probability result: prioritize the result and select its highest-probability score. Preserve the complete score distribution and older recorded forecasts. (confirmed 11 October 2026, issue #17)
 - A fixture has no kickoff date: do not generate a forecast until it has a date within the window. (confirmed)
 - A fixture is postponed: retain its forecasts, display its status, and refresh when the revised kickoff is eligible. (confirmed)
 - A fixture is cancelled: exclude it from accuracy totals. (confirmed)

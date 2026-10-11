@@ -10,6 +10,8 @@ import fixturesCronHandler from '../api/cron/fixtures.mjs';
 import predictionsHandler from '../api/cron/predictions.mjs';
 import {predictFixtures} from '../lib/prediction-job.mjs';
 import {generateWeeklyPredictions as runWeekly} from '../lib/weekly-predictions.mjs';
+import {parsePrediction} from '../lib/football.mjs';
+import {scoreAnswer} from './support/score-distribution.mjs';
 import {forecastPanel} from '../forecast-view.mjs';
 
 const enabled=!!process.env.TEST_DATABASE_URL;
@@ -746,4 +748,36 @@ dbtest('scoreboard includes prior seasons and excludes post-kickoff or ineligibl
   assert.equal(page.providerSummaries.openai.resolved,0);
   assert.equal(page.sharedComparison.resolved,0);
   assert.equal(page.providerSummaries.openai.brierScore,null);
+});
+
+
+dbtest('score distributions and method tags survive persistence, API views and result evaluation without rewriting old versions',async()=>{
+  await store.importSnapshot(baseline());
+  const old=(await store.getPredictions())[11].prediction;
+  assert.deepEqual(old,prediction);assert.equal(old.method,undefined);
+  const forecast=parsePrediction(scoreAnswer({'1_1':.30,'2_1':.26,'1_0':.24,'0_1':.20},'1_1'));
+  for(const provider of ['jev','openai']){
+    const run=await store.beginRun(`result-first:${provider}`,forecast.generatedAt);
+    await store.saveSnapshot(run.id,match.id,match);
+    await store.recordAttempt({runId:run.id,fixtureId:match.id,provider,status:'started',attemptAt:forecast.generatedAt});
+    const saved={...forecast,model:provider==='jev'?'typesafe-ai/jev':'gpt-6-luna'};
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:match.id,provider,
+      matchSignature:JSON.stringify(match),prediction:saved,completedAt:forecast.generatedAt}),true);
+    const loaded=(await store.getProviderPredictions())[11][provider].prediction;
+    assert.deepEqual(loaded,saved);
+  }
+  const fixtureView=await response(fixturesHandler);
+  assert.equal(fixtureView.matches[0].predictions.jev.method,'score-distribution-result-first-v1');
+  assert.deepEqual(fixtureView.matches[0].predictions.openai.scoreProbabilities,forecast.scoreProbabilities);
+  await store.refreshFixtures({matches:[],raw:[{id:11,event:2,team_h:1,team_a:2,kickoff_time:match.kickoff,
+    finished:true,team_h_score:2,team_a_score:1}],teams,source:baseline().fixtures.source,updatedAt:'2099-10-13T08:00:00Z'});
+  const results=await store.getResultsPage();
+  for(const provider of ['jev','openai']){
+    const entry=results.results.find(result=>result.id===11).forecasts[provider];
+    assert.equal(entry.correctOutcome,true);assert.equal(entry.correctScore,true);
+    assert.equal(entry.prediction.method,forecast.method);
+    assert.deepEqual(entry.prediction.scoreProbabilities,forecast.scoreProbabilities);
+  }
+  const originals=(await pool.query(`SELECT data FROM "${schema}".predictions WHERE fixture_id=11 AND provider='jev' ORDER BY generated_at,id`)).rows;
+  assert.deepEqual(originals[0].data,old);assert.equal(originals.length,2);
 });
