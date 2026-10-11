@@ -62,7 +62,7 @@ Move application persistence from Vercel Blob JSON files to Neon Postgres. Impor
 - One provider succeeds and the other fails: persist the success, retry only the failed provider using the saved input, and show any remaining missing or older forecast explicitly. (confirmed)
 - A failed refresh has an older successful forecast: retain it with its timestamp and failed-refresh status. (confirmed)
 - A provider fails without any previous forecast: show the missing forecast explicitly and exclude it from that provider's resolved prediction count. (assumed)
-- Outcome and scoreline disagree: display both, with independent outcome and exact-score correctness. (confirmed)
+- Outcome and scoreline disagree: reject the provider response and use scheduled retries. Both providers must return consistent forecasts. Previously recorded predictions remain unchanged. (revised 10 October 2026)
 - A fixture has no kickoff date: do not generate a forecast until it has a date within the window. (confirmed)
 - A fixture is postponed: retain its forecasts, display its status, and refresh when the revised kickoff is eligible. (confirmed)
 - A fixture is cancelled: exclude it from accuracy totals. (confirmed)

@@ -5,7 +5,7 @@ import {predictionEvidence,predictionQuestions} from '../lib/football.mjs';
 import {forecastAvailability,forecastPanel,forecastNotice} from '../forecast-view.mjs';
 
 const match={id:55,home:{name:'Home',short:'HOM'},away:{name:'Away',short:'AWY'}};
-const response=()=>({model:'gpt-6-luna',answers:Object.entries(predictionQuestions()).map(([name,q])=>({name,type:'choice',choice:name==='outcome'?'away':'1_0',probabilities:Object.keys(q.criteria).map(value=>({value,probability:value===(name==='outcome'?'away':'1_0')?1:0}))}))});
+const response=()=>({model:'gpt-6-luna',answers:Object.entries(predictionQuestions()).map(([name,q])=>({name,type:'choice',choice:name==='outcome'?'away':'0_1',probabilities:Object.keys(q.criteria).map(value=>({value,probability:value===(name==='outcome'?'away':'0_1')?1:0}))}))});
 
 test('Decisions sends equivalent evidence and all outcome and zero-to-six score choices',()=>{
   const request=decisionsRequest(match);
@@ -18,10 +18,10 @@ test('Decisions sends equivalent evidence and all outcome and zero-to-six score 
     assert.deepEqual(Object.fromEntries(question.choices.map(c=>[c.value,c.description])),predictionQuestions()[question.name].criteria);
   }
 });
-test('valid named answers preserve independent score and outcome and actual model',()=>{
+test('valid named answers preserve a consistent score and outcome and actual model',()=>{
   const body=response();body.answers.reverse();body.model='gpt-6-luna-test-snapshot';
   const p=parseDecision(body);
-  assert.equal(p.outcome,'away');assert.deepEqual(p.score,[1,0]);
+  assert.equal(p.outcome,'away');assert.deepEqual(p.score,[0,1]);
   assert.deepEqual(p.probabilities,{home:0,draw:0,away:1});
   assert.equal(p.model,body.model);assert.ok(Number.isFinite(Date.parse(p.generatedAt)));
 });
@@ -58,7 +58,7 @@ test('a rate limit is one provider attempt and does not retry inside the adapter
 test('forecast panels expose forecasts without model names or missing placeholders',()=>{
   const p={...parseDecision(response()),generatedAt:'2026-10-09T09:00:00Z',model:'<script>bad</script>',stale:true};
   const html=forecastPanel(match,'openai',p);
-  assert.match(html,/OpenAI/);assert.doesNotMatch(html,/OpenAI Decisions/);assert.match(html,/Away win/);assert.match(html,/1 : 0/);
+  assert.match(html,/OpenAI/);assert.doesNotMatch(html,/OpenAI Decisions/);assert.match(html,/Away win/);assert.match(html,/0 : 1/);
   assert.match(html,/2026-10-09T09:00:00Z/);assert.match(html,/earlier fixture information/);
   assert.ok(!html.includes('<script>'));assert.ok(!html.includes('gpt-6-luna'));assert.equal(forecastPanel(match,'jev',null), '');
   assert.equal(forecastPanel(match,'openai',p,{status:'started',availability:'fresh'}).includes('Refresh in progress'),false);
@@ -86,4 +86,15 @@ test('a matching old forecast and attempt are retained when the expected weekly 
   assert.equal(forecastAvailability(previous,attempt,'weekly:2026-10-07T08:00:00.000Z'),'retained');
   assert.equal(forecastAvailability({...previous,runId:'run-current',runKey:'weekly:2026-10-07T08:00:00.000Z'},attempt,'weekly:2026-10-07T08:00:00.000Z'),'retained');
   assert.equal(forecastAvailability({...previous,runKey:'weekly:2026-10-07T08:00:00.000Z'}, {...attempt,runId:'new-run'},'weekly:2026-10-07T08:00:00.000Z'),'retained');
+});
+
+
+test('Decisions rejects a winning outcome paired with a draw or an opposing win',()=>{
+  for(const score of ['1_1','1_0']){
+    const body=response();
+    const answer=body.answers.find(answer=>answer.name==='score');
+    answer.choice=score;
+    answer.probabilities=answer.probabilities.map(item=>({...item,probability:item.value===score?1:0}));
+    assert.throws(()=>parseDecision(body),/contradicts its predicted score/);
+  }
 });

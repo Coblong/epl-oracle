@@ -26,12 +26,12 @@ Visitors want Jev and OpenAI Decisions API opinions on upcoming Premier League f
 - **R7** (confirmed): Persist each successful provider prediction immediately. Failure by another provider must not discard it. Stories: 4
 - **R8** (confirmed): Retry failed or missing predictions before the weekly run's recovery deadline, Thursday 09:00 Europe/London, exclusive. Allow at most three total provider attempts per fixture and weekly run, with attempt starts at least 15 minutes apart. Each counted attempt makes one provider HTTP request. Do not regenerate an already successful prediction for that run. The product owner approved the attempt limit and backoff on 10 October 2026. Stories: 4
 - **R9** (confirmed): When a refresh fails, retain any older successful prediction and show its date and failed-refresh status. Do not render a forecast panel when no prediction exists. Stories: 1, 4
-- **R10** (confirmed): Preserve separate outcome and exact-score forecasts, even when they disagree. Evaluate and highlight correct outcomes and exact scores independently. Stories: 1, 2
+- **R10** (confirmed): Require outcome and exact-score forecasts to agree for both providers. Reject conflicting responses and use the existing scheduled retry policy. Previously recorded predictions remain unchanged. Evaluate and highlight correct outcomes and exact scores independently. Stories: 1, 2
 - **R11** (confirmed): Provide Upcoming and Results views in the fixture section. Completed fixtures must show the actual score alongside both providers' final forecasts. Stories: 1, 2
 - **R12** (confirmed): For each completed fixture and provider, evaluate the latest successful prediction made before kickoff. Earlier revisions must not add extra observations to the track record. Stories: 2, 3
 - **R13** (confirmed): Show each provider's full track record with sample counts, outcome accuracy, exact-score accuracy and Brier score for outcome probabilities. Stories: 3
-- **R14** (confirmed): Also show a comparison restricted to completed fixtures with eligible predictions from both providers. Preserve existing Jev history in its full track record without inventing corresponding OpenAI predictions. Stories: 3, 5
-- **R15** (assumed): A fixture without an eligible prediction for a provider must not count in that provider's resolved prediction denominator. Stories: 3
+- **R14** (confirmed): Also show a comparison restricted to completed fixtures with eligible predictions from both providers. Include retained Neon history without importing or reading Blob history, as directed by the product owner. Do not invent corresponding OpenAI predictions. Shared Brier comparisons use only fixtures with valid probability evidence from both providers. Stories: 3, 5
+- **R15** (assumed): A fixture without an eligible prediction for a provider must not count in that provider's resolved prediction denominator. Use the unscaled three-class Brier sum (0–2, lower is better), normalizing valid probability distributions within the 0.02 tolerance. Show separate Brier evidence counts and omit missing or invalid probabilities from Brier only. Empty histories show zero counts and no numeric accuracy or Brier value. Stories: 3
 - **R16** (confirmed): Retain forecasts for postponed fixtures, display their status, and refresh them when their revised kickoff enters a Wednesday prediction window. Stories: 1, 4
 - **R17** (confirmed): Exclude cancelled fixtures from accuracy totals. Stories: 3
 - **R18** (confirmed): Persist application data in Neon Postgres. Retain fixtures, prediction runs, shared input snapshots, prediction revisions and attempt status. Stories: 4, 5
@@ -88,7 +88,7 @@ Visitors want Jev and OpenAI Decisions API opinions on upcoming Premier League f
 
 - Should forecasts proceed using older fixture data when the official feed fails? Owner: product owner.
 - How should an explicit cancellation signal be represented if the official feed adds one? The current feed has no cancellation field. Owner: implementer.
-- Which Brier score convention and denominators should be used? Owner: implementer, with product owner agreement.
+- Brier implementation convention, 11 October 2026: unscaled three-class sum from 0 to 2, lower is better. Full histories use valid probability evidence for that provider. The shared comparison uses evidence valid for both providers, with separate Brier sample counts shown. No Blob backfill.
 - What are the Neon region, provisioning, credentials and production cutover procedure? Owner: operator and implementer.
 - Verify the Decisions API schema, limits and model availability, and configure its server-only credential. Owner: implementer and operator.
 

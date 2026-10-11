@@ -29,3 +29,14 @@ test('matchOutcome derives home, draw or away from the final score',()=>{assert.
 test('evaluatePrediction scores outcome and exact-score accuracy independently',()=>{const prediction={outcome:'home',score:[2,1]};assert.deepEqual(evaluatePrediction(prediction,2,1),{actualScore:[2,1],actualOutcome:'home',correctOutcome:true,correctScore:true});assert.deepEqual(evaluatePrediction(prediction,3,1),{actualScore:[3,1],actualOutcome:'home',correctOutcome:true,correctScore:false});assert.equal(evaluatePrediction(prediction,1,2).correctOutcome,false);});
 test('accuracySummary tallies a running total across resolved results',()=>{const results=[{correctOutcome:true,correctScore:true},{correctOutcome:true,correctScore:false},{correctOutcome:false,correctScore:false}];assert.deepEqual(accuracySummary(results),{resolved:3,outcomeCorrect:2,outcomeAccuracy:2/3,scoreCorrect:1,scoreAccuracy:1/3});assert.deepEqual(accuracySummary([]),{resolved:0,outcomeCorrect:0,outcomeAccuracy:null,scoreCorrect:0,scoreAccuracy:null});});
 test('accuracySummary excludes cancelled and ineligible legacy result rows',()=>{assert.deepEqual(accuracySummary([{correctOutcome:true,correctScore:true},{correctOutcome:true,correctScore:true,cancelled:true},{correctOutcome:false,correctScore:false,eligible:false}]),{resolved:1,outcomeCorrect:1,outcomeAccuracy:1,scoreCorrect:1,scoreAccuracy:1});});
+
+
+test('the shared Jev parser accepts only outcomes consistent with the exact score',()=>{
+  for(const [choice,score] of [['home','2_1'],['draw','1_1'],['away','1_2']]){
+    const body={answers:{outcome:{choice,probabilities:{home:.6,draw:.25,away:.15}},score:{choice:score}}};
+    assert.equal(parsePrediction(body).outcome,choice);
+    for(const contradictory of ['home','draw','away'].filter(outcome=>outcome!==choice)){
+      assert.throws(()=>parsePrediction({answers:{...body.answers,outcome:{...body.answers.outcome,choice:contradictory}}}),/contradicts its predicted score/);
+    }
+  }
+});

@@ -300,6 +300,17 @@ dbtest('Results use each provider latest pre-reschedule forecast and official sc
   assert.equal(first.forecasts.openai.correctOutcome,false);
   assert.equal(first.forecasts.openai.correctScore,true);
   assert.deepEqual(page.results.find(result=>result.id===12).missingProviders,['openai']);
+  assert.equal(page.providerSummaries.jev.resolved,2);
+  assert.equal(page.providerSummaries.jev.outcomeCorrect,2);
+  assert.equal(page.providerSummaries.jev.brierSampleCount,2);
+  assert.equal(page.providerSummaries.openai.resolved,1);
+  assert.equal(page.sharedComparison.resolved,1);
+  assert.equal(page.sharedComparison.providerSummaries.jev.resolved,1);
+  assert.equal(page.sharedComparison.providerSummaries.openai.resolved,1);
+  const smallerPage=await store.getResultsPage({page:1,pageSize:1});
+  assert.equal(smallerPage.results.length,1);
+  assert.deepEqual(smallerPage.providerSummaries,page.providerSummaries);
+  assert.deepEqual(smallerPage.sharedComparison,page.sharedComparison);
 
   const corrected=raw.map(f=>f.id===11?{...f,team_h_score:0,team_a_score:1}:f);
   await store.refreshFixtures({matches:[],raw:corrected,teams,source:source.fixtures.source,updatedAt:'2099-10-14T08:00:00Z'});
@@ -310,6 +321,11 @@ dbtest('Results use each provider latest pre-reschedule forecast and official sc
   assert.equal(updated.forecasts.openai.correctOutcome,true);
   assert.equal(updated.forecasts.openai.correctScore,false);
   assert.equal(page.summary.resolved,2);
+  assert.equal(page.providerSummaries.jev.outcomeCorrect,1);
+  assert.equal(page.providerSummaries.openai.outcomeCorrect,1);
+  assert.equal(page.sharedComparison.providerSummaries.jev.outcomeCorrect,0);
+  assert.equal(page.sharedComparison.providerSummaries.openai.outcomeCorrect,1);
+  assert.ok(Math.abs(page.sharedComparison.providerSummaries.jev.brierScore-1.145)<1e-12);
   const api=await response(resultsHandler,{method:'GET',url:'/api/results?page=1'});
   assert.equal(api.results.find(result=>result.id===11).forecasts.openai.correctOutcome,true);
   assert.deepEqual(api.results.find(result=>result.id===12).missingProviders,['openai']);
@@ -450,6 +466,10 @@ dbtest('lost or missing fixture data stays awaiting update and only an explicit 
   assert.deepEqual((await store.getFixtures()).matches,[]);
   const page=await store.getResultsPage();
   assert.equal(page.results.find(result=>result.id===11).status,'cancelled');
+  assert.equal(page.providerSummaries.jev.resolved,0);
+  assert.equal(page.providerSummaries.openai.resolved,0);
+  assert.equal(page.sharedComparison.resolved,0);
+  assert.equal(page.providerSummaries.jev.brierScore,null);
   assert.equal(page.summary.resolved,1);
 });
 dbtest('a stale fixture refresh or prediction cannot overwrite newer evidence',async()=>{
@@ -694,4 +714,36 @@ dbtest('a slow failed evaluation still leaves a full fifteen-minute interval bef
   assert.equal(calls,1);
   await generateWeeklyPredictions(store,{openai:provider},'2099-10-07T08:17:00Z',async()=>{});
   assert.equal(calls,2);
+});
+
+
+dbtest('scoreboard includes prior seasons and excludes post-kickoff or ineligible selections',async()=>{
+  const oldFixture={...match,id:81,kickoff:'2025-10-12T12:00:00Z'};
+  const currentFixture={...match,id:82,kickoff:'2026-10-12T12:00:00Z'};
+  const source=baseline();source.predictions={};source.results=[];source.fixtures.matches=[oldFixture,currentFixture];
+  await store.importSnapshot(source);
+  for(const [fixture,provider] of [[oldFixture,'jev'],[oldFixture,'openai'],[currentFixture,'jev']]){
+    const generatedAt=fixture.id===81?'2025-10-11T09:00:00Z':'2026-10-11T09:00:00Z';
+    const run=await store.beginRun(`history:${fixture.id}:${provider}`,generatedAt);
+    await store.saveSnapshot(run.id,fixture.id,fixture);
+    await store.recordAttempt({runId:run.id,fixtureId:fixture.id,provider,status:'started',attemptAt:generatedAt});
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:fixture.id,provider,
+      matchSignature:JSON.stringify(fixture),prediction:{...prediction,generatedAt},completedAt:generatedAt}),true);
+  }
+  await store.refreshFixtures({matches:[],raw:[oldFixture,currentFixture].map(fixture=>({
+    id:fixture.id,event:2,team_h:1,team_a:2,kickoff_time:fixture.kickoff,finished:true,team_h_score:2,team_a_score:1,
+  })),teams,source:source.fixtures.source,updatedAt:'2026-10-13T08:00:00Z'});
+  let page=await store.getResultsPage();
+  assert.equal(page.results.length,1);
+  assert.equal(page.providerSummaries.jev.resolved,2);
+  assert.equal(page.providerSummaries.openai.resolved,1);
+  assert.equal(page.sharedComparison.resolved,1);
+  await pool.query(`UPDATE "${schema}".result_predictions SET eligible=false,correct_outcome=NULL,correct_score=NULL WHERE fixture_id=82`);
+  page=await store.getResultsPage();
+  assert.equal(page.providerSummaries.jev.resolved,1);
+  await pool.query(`UPDATE "${schema}".predictions SET generated_at='2025-10-12T12:00:00Z' WHERE fixture_id=81 AND provider='openai'`);
+  page=await store.getResultsPage();
+  assert.equal(page.providerSummaries.openai.resolved,0);
+  assert.equal(page.sharedComparison.resolved,0);
+  assert.equal(page.providerSummaries.openai.brierScore,null);
 });
