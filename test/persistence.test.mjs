@@ -781,3 +781,35 @@ dbtest('score distributions and method tags survive persistence, API views and r
   const originals=(await pool.query(`SELECT data FROM "${schema}".predictions WHERE fixture_id=11 AND provider='jev' ORDER BY generated_at,id`)).rows;
   assert.deepEqual(originals[0].data,old);assert.equal(originals.length,2);
 });
+
+dbtest('predictions remain visible after kickoff and in-progress refresh until a complete result arrives',async t=>{
+  const kickoff='2026-10-11T12:00:00Z';
+  const fixture={...match,kickoff};
+  const source=baseline();source.fixtures.matches=[fixture];source.predictions[11].matchSignature=JSON.stringify(fixture);
+  await store.importSnapshot(source);
+  const run=await store.beginRun('visibility:openai','2026-10-11T09:00:00Z');
+  await store.saveSnapshot(run.id,11,fixture);
+  await store.recordAttempt({runId:run.id,fixtureId:11,provider:'openai',status:'started',attemptAt:'2026-10-11T09:00:00Z'});
+  await store.savePrediction({runId:run.id,fixtureId:11,provider:'openai',matchSignature:JSON.stringify(fixture),prediction,completedAt:'2026-10-11T09:00:00Z'});
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-10-11T14:00:00Z')});
+  const assertVisible=async()=>{
+    const page=await response(fixturesHandler);
+    assert.equal(page.matches.length,1,'match remains on Predictions until a result is stored');
+    for(const provider of ['jev','openai'])assert.deepEqual(page.matches[0].predictions[provider].score,[2,1]);
+    assert.equal((await store.getResultsPage()).results.length,0);
+  };
+  await assertVisible();
+  // Simulate the previous release hiding a started match.
+  await pool.query(`UPDATE "${schema}".fixtures SET upcoming=false,data=data || '{"fixtureStatus":"in_progress"}'::jsonb WHERE id=11`);
+  await assertVisible();
+  const raw={id:11,event:2,team_h:1,team_a:2,kickoff_time:kickoff,started:true,finished:false,team_h_score:1,team_a_score:0};
+  await store.refreshFixtures({matches:[],raw:[raw],teams,source:source.fixtures.source,updatedAt:'2026-10-11T13:00:00Z'});
+  await assertVisible();
+  await store.refreshFixtures({matches:[],raw:[{...raw,finished:true,team_a_score:null}],teams,source:source.fixtures.source,updatedAt:'2026-10-11T13:30:00Z'});
+  await assertVisible();
+  await store.refreshFixtures({matches:[],raw:[{...raw,finished_provisional:true,team_h_score:2,team_a_score:1}],teams,source:source.fixtures.source,updatedAt:'2026-10-11T14:00:00Z'});
+  assert.deepEqual((await response(fixturesHandler)).matches,[]);
+  const result=(await store.getResultsPage()).results[0];
+  assert.deepEqual(result.actualScore,[2,1]);
+  for(const provider of ['jev','openai'])assert.deepEqual(result.forecasts[provider].prediction.score,[2,1]);
+});

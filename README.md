@@ -50,6 +50,8 @@ Run `npm test` for fixture, prediction, accuracy and migration-source tests. Set
 - The existing Hobby cron entries provide up to three eligible invocations per weekly window in GMT or BST. They do not guarantee three attempts: hour-wide invocation jitter can put adjacent calls less than 15 minutes apart, causing the later call to skip. Backoff specifies earliest eligibility; it does not schedule a request 15 minutes later.
 - Fixture cards show separate Jev and OpenAI opinions, probabilities, predicted result, predicted score and London generation timestamp. New outcome and score forecasts are derived from a single score distribution and always agree; older recorded forecasts retain their original values. Results and scoreboard summaries include both providers.
 
+Matches and both providers’ forecasts remain on Predictions after kickoff until a complete finished score is stored, then move to Results. A running score or elapsed kickoff alone does not remove them. Explicit cancellations are still removed. Unresolved matches show "Awaiting result" after a fixture refresh.
+
 ### Result-first forecasts
 
 For both providers, validate exactly 49 score probabilities, each finite and between 0 and 1, with a total within 0.02 of 1. Normalize accepted distributions. Sum home-winning, drawn and away-winning scorelines to derive outcome probabilities. Choose the highest-probability result, then the highest-probability score within that result. The provider’s own global score choice does not override this selection.

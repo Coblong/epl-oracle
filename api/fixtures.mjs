@@ -18,7 +18,6 @@ export default async function handler(req, res) {
     const now = Date.now();
     const expectedRunKey = expectedWeeklyRunKey(now);
     const matches = fixtures.matches
-      .filter(m => !m.kickoff || Date.parse(m.kickoff) > now || m.fixtureStatus === 'awaiting_update')
       .map(m => {
         const entry = predictions[m.id];
         let matches = entry?.matchSignature === JSON.stringify(m);
