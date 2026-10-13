@@ -83,4 +83,4 @@ The scoreboard uses the [multiclass Brier score](https://scikit-learn.org/1.7/mo
 
 ### Fixture refresh workflow
 
-See [fixture refresh setup and recovery](docs/fixture-refresh.md) for the GitHub runner access check, gated daily schedule, manual refresh and verified cutover. The Vercel fixture cron remains until a successful replacement run has been verified. Fixture/result data older than 24 hours displays a warning.
+See [fixture refresh setup and recovery](docs/fixture-refresh.md) for the GitHub runner access check, gated daily schedule, manual refresh and verified cutover. The GitHub daily refresh is enabled after a verified production run; Vercel now schedules only forecast generation. Fixture/result data older than 24 hours displays a warning.
