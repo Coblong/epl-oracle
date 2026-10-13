@@ -1,0 +1,55 @@
+name: Fixture refresh
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/fixture-refresh.yml'
+      - 'lib/fixture-refresh.mjs'
+      - 'lib/football.mjs'
+      - 'lib/http.mjs'
+      - 'scripts/check-fpl-access.mjs'
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Check access only, or refresh production after access passes'
+        type: choice
+        options: [check, refresh]
+        default: check
+permissions:
+  contents: read
+concurrency:
+  group: fixture-refresh-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  cancel-in-progress: false
+jobs:
+  access:
+    if: github.event_name != 'schedule' || vars.FIXTURE_REFRESH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify fixture and team feed access without credentials
+        run: node scripts/check-fpl-access.mjs
+  refresh:
+    needs: access
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'refresh')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Refresh fixtures and score retained predictions
+        env:
+          DATABASE_URL: ${{ secrets.FIXTURE_DATABASE_URL }}
+          DATABASE_SCHEMA: epl_oracle
+          PERSISTENCE_BACKEND: neon
+        run: node scripts/refresh-fixtures.mjs

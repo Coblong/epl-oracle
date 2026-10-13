@@ -80,3 +80,7 @@ The scoreboard uses the [multiclass Brier score](https://scikit-learn.org/1.7/mo
 - [Vercel Cron Jobs](https://vercel.com/docs/cron-jobs)
 - [Official fixtures](https://fantasy.premierleague.com/api/fixtures/)
 - [Official club metadata](https://fantasy.premierleague.com/api/bootstrap-static/)
+
+### Fixture refresh workflow
+
+See [fixture refresh setup and recovery](docs/fixture-refresh.md) for the GitHub runner access check, gated daily schedule, manual refresh and verified cutover. The Vercel fixture cron remains until a successful replacement run has been verified. Fixture/result data older than 24 hours displays a warning.
