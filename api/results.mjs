@@ -1,3 +1,4 @@
+import {fixtureFreshness} from '../fixture-freshness.mjs';
 import {getStore} from '../lib/store.mjs';
 
 const json = (res, status, data) => {
@@ -13,7 +14,8 @@ export default async function handler(req, res) {
     const requestedPage=req.query?.page ?? (req.url ? new URL(req.url,'http://localhost').searchParams.get('page') : null);
     const store=getStore();
     const resultPage=await store.getResultsPage({page:requestedPage ?? 1,pageSize:20});
-    return json(res, 200, resultPage);
+    const fixtures=await store.getFixtures();
+    return json(res, 200, {...resultPage,fixtureRefresh:fixtureFreshness(fixtures?.updatedAt)});
   } catch (e) {
     console.error(e);
     return json(res, 502, {error: 'Unable to load the track record. Please try again.'});

@@ -1,3 +1,4 @@
+import {fixtureFreshness} from './fixture-freshness.mjs';
 import {forecastPanel,forecastNotice} from './forecast-view.mjs';
 const $=s=>document.querySelector(s);
 let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null;
@@ -15,7 +16,8 @@ const groups=new Map();for(const m of visible){const key=dateKey(m);if(!groups.h
 $('#matches').innerHTML=visible.length?[...groups.values()].map(group=>`<div class="date-heading">${group[0].kickoff?fmt(group[0].kickoff,{weekday:'long',day:'numeric',month:'long',year:'numeric'}):'Date to be confirmed'}<span>${group.length} ${group.length===1?'match':'matches'}</span></div><div class="cards">${group.map(card).join('')}</div>`).join(''):'<div class="empty">No upcoming fixtures match this selection.</div>';document.querySelectorAll('[data-weight]').forEach(el=>el.style.setProperty('--weight',el.dataset.weight));$('#load-more').hidden=visible.length>=all.length;}
 function notice(text,error=false){$('#notice').textContent=text;$('#notice').classList.toggle('error',error);}
 async function request(url){const r=await fetch(url);const data=await r.json();if(!r.ok)throw new Error(data.error||'Request failed. Please retry.');return data;}
-async function load(){$('#refresh').disabled=true;notice('Fetching official Premier League fixtures…');try{const d=await request('/api/fixtures');matches=d.matches;const previous=$('#gameweek').value;$('#gameweek').innerHTML='<option value="all">All gameweeks</option>'+[...new Set(matches.map(m=>m.gameweek).filter(x=>x!=null))].sort((a,b)=>a-b).map(g=>`<option value="${g}">Gameweek ${g}</option>`).join('');$('#gameweek').value=[...$('#gameweek').options].some(x=>x.value===previous)?previous:'all';$('#fixture-count').textContent=matches.length;$('#updated').textContent=`Updated ${fmt(d.updatedAt,{hour:'2-digit',minute:'2-digit'})} · ${fmt(d.updatedAt,{day:'numeric',month:'short'})}`;render();const message=forecastNotice(d.providersConfigured??{jev:d.configured,openai:false});notice(message.text,message.error);}catch(e){notice(e.message,true);if(!matches.length)$('#matches').innerHTML='<div class="empty">Fixtures are unavailable right now. Use Refresh to try again.</div>';}finally{$('#refresh').disabled=false;}}
+function renderFreshness(updatedAt){const status=fixtureFreshness(updatedAt);const el=$('#fixture-freshness');el.hidden=!status.stale;el.textContent=status.message;}
+async function load(){$('#refresh').disabled=true;notice('Fetching official Premier League fixtures…');try{const d=await request('/api/fixtures');matches=d.matches;renderFreshness(d.updatedAt);const previous=$('#gameweek').value;$('#gameweek').innerHTML='<option value="all">All gameweeks</option>'+[...new Set(matches.map(m=>m.gameweek).filter(x=>x!=null))].sort((a,b)=>a-b).map(g=>`<option value="${g}">Gameweek ${g}</option>`).join('');$('#gameweek').value=[...$('#gameweek').options].some(x=>x.value===previous)?previous:'all';$('#fixture-count').textContent=matches.length;$('#updated').textContent=`Updated ${fmt(d.updatedAt,{hour:'2-digit',minute:'2-digit'})} · ${fmt(d.updatedAt,{day:'numeric',month:'short'})}`;render();const message=forecastNotice(d.providersConfigured??{jev:d.configured,openai:false});notice(message.text,message.error);}catch(e){notice(e.message,true);if(!matches.length)$('#matches').innerHTML='<div class="empty">Fixtures are unavailable right now. Use Refresh to try again.</div>';}finally{$('#refresh').disabled=false;}}
 function resultRow(r){
   const forecasts=['jev','openai'].map(provider=>{
     const entry=r.forecasts?.[provider];
@@ -51,6 +53,7 @@ function renderScoreboard(){
 async function loadResults(page=1,append=false){
   try{
     const d=await request(`/api/results?page=${page}`);
+    if(d.fixtureRefresh)renderFreshness(d.fixtureRefresh.updatedAt);
     resultsPage=d.page;resultsTotal=d.total;
     trackRecord={providerSummaries:d.providerSummaries,sharedComparison:d.sharedComparison};
     renderScoreboard();

@@ -1,3 +1,4 @@
+import {fixtureFreshness} from '../fixture-freshness.mjs';
 import {getStore} from '../lib/store.mjs';
 import {fingerprint} from '../lib/migration.mjs';
 import {expectedWeeklyRunKey} from '../lib/weekly-predictions.mjs';
@@ -42,6 +43,7 @@ export default async function handler(req, res) {
       matches,
       source: fixtures.source,
       updatedAt: fixtures.updatedAt,
+      fixtureRefresh:fixtureFreshness(fixtures.updatedAt,now),
       configured: !!process.env.AI_GATEWAY_API_KEY,
       providersConfigured:{jev:!!process.env.AI_GATEWAY_API_KEY, openai:!!process.env.OPENAI_API_KEY},
     });
