@@ -32,7 +32,7 @@ test('a match card lists each agent once in registry order and keeps forecast de
   }
   assert.equal((html.match(/class="agent-row"/g)||[]).length,5);
   assert.match(html,/<details/);
-  assert.match(html,/Predicted score/);
+  assert.match(html,/aria-label="Jev: Arsenal win, predicted score 2 : 1"/);
   assert.match(html,/gpt-6-luna/);
   assert.match(html,/2026-10-23T09:01:00Z/);
   assert.match(html,/Retries exhausted/);
@@ -46,8 +46,8 @@ test('a match card lists each agent once in registry order and keeps forecast de
 test('missing agents stay visible without an invented forecast',()=>{
   const html=renderMatchCard({...match,predictions:{},forecastStates:{}});
   assert.equal((html.match(/class="agent-row"/g)||[]).length,5);
-  assert.equal((html.match(/No prediction yet/g)||[]).length,5);
-  assert.doesNotMatch(html,/Predicted score/);
+  assert.equal((html.match(/class="forecast-state missing">No prediction<\/span>/g)||[]).length,5);
+  assert.doesNotMatch(html,/predicted score/i);
 });
 
 test('fixture rescheduling remains visible in the match header',()=>{

@@ -23,8 +23,7 @@ function agentRow(match,agent,forecast,state={}){
   const status=statuses[state.status]??'';
   const count=state.attemptCount>0?` Attempt ${state.attemptCount} of 3.`:'';
   const retained=availability==='retained';
-  const terminalMissing=availability==='missing'&&['exhausted','expired'].includes(state.status);
-  const label=retained?'Retained forecast':availability==='fresh'?'Fresh forecast':terminalMissing?'No prediction':'No prediction yet';
+  const label=retained?'Retained':availability==='fresh'?'Fresh':'No prediction';
   const result=forecast?forecast.outcome==='draw'?'Draw':`${match[forecast.outcome]?.name??'Unknown'} win`:'';
   const score=forecast?.score?.join(' : ')??'';
   const generated=forecast?.generatedAt??'';
@@ -33,8 +32,9 @@ function agentRow(match,agent,forecast,state={}){
   const time=generated?`<time datetime="${escape(generated)}">${fmt(generated,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} London</time>`:'Not generated';
   const freshness=forecast?.stale?'Based on earlier fixture information.':'Based on current fixture information.';
   const retries=status?`${status}${retained?' Earlier forecast retained.':''}${count}${state.status==='failed'?' Waiting for a scheduled retry.':''}`:`No retry pending.${count}`;
-  const details=forecast?`<details class="agent-details"><summary>Forecast details</summary>${probabilityText}<p>Model: ${escape(forecast.model??'Unavailable')}</p><p>Generated: ${time}</p><p>${freshness}</p><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</details>`:`<details class="agent-details"><summary>Forecast details</summary><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</details>`;
-  return `<section class="agent-row" aria-label="${escape(agent.name)} forecast"><div class="agent-identity"><strong>${escape(agent.name)}</strong><span class="forecast-state ${availability}">${label}</span></div><div class="agent-score">${forecast?`<span>Predicted result: ${escape(result)}</span><strong>Predicted score: ${escape(score)}</strong>`:'<span class="no-forecast">—</span>'}</div>${details}</section>`;
+  const details=forecast?`<details class="agent-details"><summary>Details</summary>${probabilityText}<p>Model: ${escape(forecast.model??'Unavailable')}</p><p>Generated: ${time}</p><p>${freshness}</p><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</details>`:`<details class="agent-details"><summary>Details</summary><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</details>`;
+  const scoreLabel=forecast?`${result}, predicted score ${score}`:'No prediction';
+  return `<section class="agent-row" aria-label="${escape(agent.name)} forecast"><div class="agent-identity"><strong>${escape(agent.name)}</strong><span class="forecast-state ${availability}">${label}</span></div><div class="agent-score" aria-label="${escape(agent.name)}: ${escape(scoreLabel)}">${forecast?`<span>${escape(result)}</span><strong>${escape(score)}</strong>`:'<span class="no-forecast">—</span>'}</div>${details}</section>`;
 }
 
 export function renderMatchCard(match){
