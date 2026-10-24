@@ -514,6 +514,76 @@ dbtest('the Results API paginates the current season in groups of twenty',async(
   assert.equal(secondPage.hasMore,false);
 });
 
+dbtest('gameweek summaries use the full official season, preserve postponed rounds and recalculate corrections',async()=>{
+  const kickoff=(day,hour='12')=>`2026-09-${String(day).padStart(2,'0')}T${hour}:00:00Z`;
+  const fixtures=[
+    {id:201,gameweek:1,kickoff:kickoff(1),home,away},
+    {id:202,gameweek:1,kickoff:kickoff(2),home,away},
+    {id:203,gameweek:1,kickoff:kickoff(3),home,away},
+    ...Array.from({length:21},(_,index)=>({id:204+index,gameweek:2,kickoff:kickoff(index+1,'15'),home,away})),
+  ];
+  const source=baseline();source.predictions={};source.results=[{...result,id:199,kickoff:'2025-09-01T12:00:00Z'}];
+  source.fixtures={...source.fixtures,matches:fixtures,updatedAt:'2026-10-01T08:00:00Z'};
+  await store.importSnapshot(source);
+  const scored=fixtures[0];
+  for(const [provider,score,at] of [
+    ['jev',[5,0],'2026-08-31T08:00:00Z'],['openai',[4,0],'2026-08-31T09:00:00Z'],
+  ]){
+    const forecast={...prediction,score,generatedAt:at};
+    const run=await store.beginRun(`gameweek-${provider}`,at);
+    await store.saveSnapshot(run.id,scored.id,scored);
+    await store.recordAttempt({runId:run.id,fixtureId:scored.id,provider,status:'started',attemptAt:at});
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:scored.id,provider,
+      matchSignature:JSON.stringify(scored),prediction:forecast,completedAt:at}),true);
+  }
+  const raw=fixtures.map(f=>({id:f.id,event:f.gameweek,team_h:1,team_a:2,kickoff_time:f.kickoff,finished:true,team_h_score:2,team_a_score:1}));
+  raw[1]={...raw[1],cancelled:true,finished:false,team_h_score:null,team_a_score:null};
+  raw[2]={id:203,event:null,team_h:1,team_a:2,kickoff_time:null,finished:false,started:false};
+  await store.refreshFixtures({matches:[{...fixtures[2],gameweek:null,kickoff:null,fixtureStatus:'awaiting_date'}],raw,teams,
+    source:source.fixtures.source,updatedAt:'2026-10-01T08:00:00Z'});
+
+  const first=await response(resultsHandler,{method:'GET',url:'/api/results?page=1'});
+  const second=await response(resultsHandler,{method:'GET',url:'/api/results?page=2'});
+  assert.equal(first.results.length,20);
+  assert.equal(second.results.length,3);
+  assert.deepEqual(first.gameweeks,second.gameweeks);
+  const [weekOne,weekTwo]=first.gameweeks;
+  assert.deepEqual(weekOne.counts,{fixtures:2,completed:1,remaining:1,cancelled:1});
+  assert.equal(weekOne.complete,false);
+  assert.equal(weekOne.oScoreSummaries.jev.total,4);
+  assert.equal(weekOne.oScoreSummaries.openai.total,3);
+  assert.equal(weekOne.oScoreSummaries.claude.total,3.5);
+  assert.equal(weekOne.providerSummaries.claude.resolved,0);
+  assert.deepEqual(weekTwo.counts,{fixtures:21,completed:21,remaining:0,cancelled:0});
+  assert.equal(weekTwo.complete,true);
+
+  await store.refreshFixtures({matches:[],raw:raw.filter(fixture=>fixture.id!==203),teams,
+    source:source.fixtures.source,updatedAt:'2026-10-01T09:00:00Z'});
+  const temporarilyMissing=(await response(resultsHandler)).gameweeks[0];
+  assert.deepEqual(temporarilyMissing.counts,{fixtures:2,completed:1,remaining:1,cancelled:1});
+  assert.equal(temporarilyMissing.complete,false);
+
+  raw[0]={...raw[0],team_h_score:4,team_a_score:1};
+  await store.refreshFixtures({matches:[{...fixtures[2],gameweek:null,kickoff:null,fixtureStatus:'awaiting_date'}],raw,teams,
+    source:source.fixtures.source,updatedAt:'2026-10-02T08:00:00Z'});
+  const corrected=(await response(resultsHandler)).gameweeks[0];
+  assert.equal(corrected.oScoreSummaries.jev.total,2);
+  assert.equal(corrected.oScoreSummaries.openai.total,1);
+  assert.equal(corrected.oScoreSummaries.claude.total,1.5);
+
+  raw[2]={...raw[2],event:2,kickoff_time:'2026-10-30T12:00:00Z'};
+  await store.refreshFixtures({matches:[{...fixtures[2],gameweek:2,kickoff:raw[2].kickoff_time}],raw,teams,
+    source:source.fixtures.source,updatedAt:'2026-10-03T08:00:00Z'});
+  const reassigned=(await response(resultsHandler)).gameweeks;
+  assert.deepEqual(reassigned.map(week=>[week.gameweek,week.counts.fixtures,week.counts.remaining]),[[1,1,0],[2,22,1]]);
+  assert.equal(reassigned[0].counts.cancelled,1);
+
+  await store.refreshFixtures({matches:[],raw:[{id:300,event:1,team_h:1,team_a:2,kickoff_time:'2027-08-10T12:00:00Z',
+    finished:true,team_h_score:1,team_a_score:0}],teams,source:source.fixtures.source,updatedAt:'2027-09-01T08:00:00Z'});
+  const nextSeason=(await response(resultsHandler)).gameweeks;
+  assert.deepEqual(nextSeason.map(week=>[week.gameweek,week.counts.fixtures]),[[1,1]]);
+});
+
 dbtest('lost or missing fixture data stays awaiting update and only an explicit cancellation removes it from totals',async()=>{
   const source=baseline();await store.importSnapshot(source);
   const lost={id:11,event:2,team_h:1,team_a:2,kickoff_time:null,finished:false,started:false,provisional_start_time:true};
