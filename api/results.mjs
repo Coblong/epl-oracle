@@ -1,6 +1,9 @@
 import {AGENTS} from '../agents.mjs';
 import {fixtureFreshness} from '../fixture-freshness.mjs';
+import {O_SCORE_RULES} from '../lib/o-score.mjs';
 import {getStore} from '../lib/store.mjs';
+
+const competition=Object.freeze({active:false,startedAt:null,includedFixtureBoundary:null});
 
 const json = (res, status, data) => {
   res.statusCode = status;
@@ -16,7 +19,8 @@ export default async function handler(req, res) {
     const store=getStore();
     const resultPage=await store.getResultsPage({page:requestedPage ?? 1,pageSize:20});
     const fixtures=await store.getFixtures();
-    return json(res, 200, {...resultPage,agents:AGENTS,fixtureRefresh:fixtureFreshness(fixtures?.updatedAt)});
+    return json(res, 200, {...resultPage,agents:AGENTS,competition,scoringRules:O_SCORE_RULES,
+      fixtureRefresh:fixtureFreshness(fixtures?.updatedAt)});
   } catch (e) {
     console.error(e);
     return json(res, 502, {error: 'Unable to load the track record. Please try again.'});

@@ -334,6 +334,63 @@ dbtest('Results use each provider latest pre-reschedule forecast and official sc
   assert.deepEqual(api.results.find(result=>result.id===12).missingProviders,['openai','claude','chatgpt','gemini']);
 });
 
+dbtest('Results expose earned and mean-assigned O Scores without adding missing forecasts',async()=>{
+  const withoutForecast={...match,id:12,kickoff:'2099-10-12T15:00:00Z'};
+  const source=baseline();source.predictions={};source.results=[];source.fixtures.matches=[match,withoutForecast];
+  await store.importSnapshot(source);
+  async function saveScoreForecast(provider,score,outcome,generatedAt){
+    const forecast={...prediction,score,outcome,generatedAt};
+    const run=await store.beginRun(`o-score-${provider}`,generatedAt);
+    await store.saveSnapshot(run.id,match.id,match);
+    await store.recordAttempt({runId:run.id,fixtureId:match.id,provider,status:'started',attemptAt:generatedAt});
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:match.id,provider,matchSignature:JSON.stringify(match),prediction:forecast,completedAt:generatedAt}),true);
+  }
+  await saveScoreForecast('jev',[5,0],'home','2099-10-11T08:00:00Z');
+  await saveScoreForecast('openai',[4,0],'home','2099-10-11T09:00:00Z');
+  await store.refreshFixtures({matches:[],teams,source:source.fixtures.source,updatedAt:'2099-10-13T08:00:00Z',raw:[
+    {id:match.id,event:2,kickoff_time:match.kickoff,team_h:1,team_a:2,team_h_score:5,team_a_score:0,finished:true},
+    {id:withoutForecast.id,event:2,kickoff_time:withoutForecast.kickoff,team_h:1,team_a:2,team_h_score:0,team_a_score:0,finished:true},
+  ]});
+
+  const page=await store.getResultsPage();
+  const result=page.results.find(row=>row.id===match.id);
+  assert.equal(result.oScores.jev.value,0);
+  assert.equal(result.oScores.jev.source,'earned');
+  assert.deepEqual([result.oScores.openai.homeGoalError,result.oScores.openai.awayGoalError,result.oScores.openai.resultPenalty],[1,0,0]);
+  assert.equal(result.oScores.openai.value,1);
+  assert.equal(result.oScores.claude.value,0.5);
+  assert.equal(result.oScores.claude.source,'mean_assigned');
+  assert.equal(result.oScores.claude.homeGoalError,null);
+  assert.equal(result.forecasts.claude,undefined);
+  assert.deepEqual(result.missingProviders,['claude','chatgpt','gemini']);
+  assert.deepEqual(page.providerSummaries.claude.oScoreDiagnostics,
+    {scope:'full_history',earnedCount:0,meanAssignedCount:1,sampleCount:1,total:0.5,average:0.5});
+  const allMissing=page.results.find(row=>row.id===withoutForecast.id);
+  assert.deepEqual(allMissing.actualScore,[0,0]);
+  assert.deepEqual(allMissing.missingProviders,['jev','openai','claude','chatgpt','gemini']);
+  assert.deepEqual(allMissing.forecasts,{});
+  for(const score of Object.values(allMissing.oScores)) assert.equal(score.source,'unavailable');
+
+  const api=await response(resultsHandler,{method:'GET',url:'/api/results'});
+  assert.deepEqual(api.competition,{active:false,startedAt:null,includedFixtureBoundary:null});
+  assert.equal(api.scoringRules.id,'oracle-score-v1');
+  assert.equal(api.results.find(row=>row.id===match.id).oScores.claude.source,'mean_assigned');
+
+  await store.refreshFixtures({matches:[],teams,source:source.fixtures.source,updatedAt:'2099-10-14T08:00:00Z',raw:[
+    {id:match.id,event:2,kickoff_time:match.kickoff,team_h:1,team_a:2,team_h_score:4,team_a_score:1,finished:true},
+    {id:withoutForecast.id,event:2,kickoff_time:withoutForecast.kickoff,team_h:1,team_a:2,team_h_score:0,team_a_score:0,finished:true},
+  ]});
+  const corrected=await store.getResultsPage();
+  const correctedResult=corrected.results.find(row=>row.id===match.id);
+  assert.equal(correctedResult.oScores.jev.value,2);
+  assert.equal(correctedResult.oScores.openai.value,1);
+  assert.equal(correctedResult.oScores.claude.value,1.5);
+  assert.deepEqual(corrected.providerSummaries.jev.oScoreDiagnostics,
+    {scope:'full_history',earnedCount:1,meanAssignedCount:0,sampleCount:1,total:2,average:2});
+  assert.deepEqual(corrected.providerSummaries.claude.oScoreDiagnostics,
+    {scope:'full_history',earnedCount:0,meanAssignedCount:1,sampleCount:1,total:1.5,average:1.5});
+});
+
 dbtest('daily refresh settles provisional final scores, retains both pre-kickoff forecasts, and leaves an unconfirmed 90-minute match unresolved',async()=>{
   const kickoff='2026-10-10T11:00:00Z';
   const provisional={...match,id:71,kickoff};
