@@ -73,11 +73,11 @@ test('forecast panels expose forecasts without model names or missing placeholde
 test('forecast notice only claims automatic updates for enabled providers',()=>{
   const none=forecastNotice({jev:false,openai:false});
   assert.equal(none.error,true);assert.ok(!none.text.includes('automatically'));
-  assert.match(forecastNotice({jev:true,openai:false}).text,/Jev forecasts/);
-  assert.match(forecastNotice({jev:true,openai:false}).text,/OpenAI is currently unavailable/);
-  assert.match(forecastNotice({jev:false,openai:true}).text,/OpenAI forecasts/);
-  assert.match(forecastNotice({jev:false,openai:true}).text,/Jev is currently unavailable/);
-  assert.match(forecastNotice({jev:true,openai:true}).text,/Jev and OpenAI forecasts/);
+  assert.match(forecastNotice({jev:true,openai:false}).text,/Forecasts from Jev/);
+  assert.match(forecastNotice({jev:true,openai:false}).text,/Decisions API, Claude, ChatGPT and Gemini are currently unavailable/);
+  assert.match(forecastNotice({jev:false,openai:true}).text,/Forecasts from Decisions API/);
+  assert.match(forecastNotice({jev:false,openai:true}).text,/Jev, Claude, ChatGPT and Gemini are currently unavailable/);
+  assert.match(forecastNotice({jev:true,openai:true}).text,/Forecasts from Jev and Decisions API/);
   assert.match(forecastNotice({jev:true,openai:true}).text,/next ten days/);
   assert.match(forecastNotice({jev:true,openai:true}).text,/Wednesday.*09:00.*09:59.*London/);
   assert.ok(!forecastNotice({jev:true,openai:true}).text.includes('each day'));

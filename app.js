@@ -1,16 +1,13 @@
 import {fixtureFreshness} from './fixture-freshness.mjs';
-import {forecastPanel,forecastNotice} from './forecast-view.mjs';
+import {forecastNotice} from './forecast-view.mjs';
+import {renderMatchCard} from './match-card.mjs';
 const $=s=>document.querySelector(s);
 let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null;
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(date,options)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',...options}).format(new Date(date));
 const dateKey=m=>m.kickoff?fmt(m.kickoff,{year:'numeric',month:'2-digit',day:'2-digit'}):'TBC';
 function filtered(){const q=$('#search').value.trim().toLowerCase(),gw=$('#gameweek').value;return matches.filter(m=>(gw==='all'||String(m.gameweek)===gw)&&(!q||`${m.home.name} ${m.away.name}`.toLowerCase().includes(q)));}
-function form(team){return `<div class="form" aria-label="Recent form: ${team.recent.map(g=>g.result).join(', ')||'Unavailable'}">${team.recent.map(g=>`<b class="${g.result}">${g.result}</b>`).join('')}</div>`;}
-function team(t){return `<div><img class="crest" src="https://resources.premierleague.com/premierleague/badges/t${Number(t.code)}.svg" alt="" loading="lazy"><div class="team-name">${escape(t.name)}</div>${form(t)}</div>`;}
-function card(m){const forecasts=m.predictions??{jev:m.prediction};
-const status=['awaiting_result','in_progress'].includes(m.fixtureStatus)?'Awaiting result':m.fixtureStatus==='awaiting_rescheduling'?'Awaiting rescheduling':m.fixtureStatus==='awaiting_update'?'Awaiting fixture update':m.fixtureStatus==='awaiting_date'?'Date to be confirmed':m.kickoff?fmt(m.kickoff,{hour:'2-digit',minute:'2-digit'}):'Time TBC';
-return `<article class="card" id="match-${m.id}" aria-label="${escape(m.home.name)} versus ${escape(m.away.name)}"><div class="card-top"><span class="gw">GAMEWEEK ${m.gameweek??'TBC'}</span><span>${status}${m.provisional?' · provisional':''}</span></div><div class="teams">${team(m.home)}<div><div class="score waiting">VS</div><div class="score-caption">FIXTURE</div></div>${team(m.away)}</div>${['jev','openai'].map(provider=>forecastPanel(m,provider,forecasts[provider],m.forecastStates?.[provider])).join('')}</article>`;}
+function card(m){return renderMatchCard(m);}
 function render(){const all=filtered(),visible=all.slice(0,limit);$('#shown-count').textContent=all.length;
 const groups=new Map();for(const m of visible){const key=dateKey(m);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(m);}
 $('#matches').innerHTML=visible.length?[...groups.values()].map(group=>`<div class="date-heading">${group[0].kickoff?fmt(group[0].kickoff,{weekday:'long',day:'numeric',month:'long',year:'numeric'}):'Date to be confirmed'}<span>${group.length} ${group.length===1?'match':'matches'}</span></div><div class="cards">${group.map(card).join('')}</div>`).join(''):'<div class="empty">No upcoming fixtures match this selection.</div>';document.querySelectorAll('[data-weight]').forEach(el=>el.style.setProperty('--weight',el.dataset.weight));$('#load-more').hidden=visible.length>=all.length;}
