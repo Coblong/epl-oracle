@@ -31,3 +31,19 @@
 @media(max-width:620px){.agent-row{grid-template-columns:minmax(82px,.8fr) minmax(120px,1.3fr) 72px;padding:12px 0;gap:7px 8px}.agent-identity{grid-column:1;grid-row:1}.agent-score{grid-column:2;grid-row:1 / span 2;align-self:center;display:grid;gap:3px}.agent-score strong{font-size:14px}.agent-details{width:72px;max-width:72px;grid-column:3;grid-row:1 / span 2;align-self:center}.agent-details summary{max-width:72px;text-align:center}.agent-probabilities{flex-wrap:wrap}}
 @media(max-width:560px){.cards{grid-template-columns:1fr}}
 @media(max-width:360px){.agent-row{grid-template-columns:62px minmax(80px,1fr) 58px;gap:5px}.agent-details{width:58px;max-width:58px}.agent-details summary{max-width:58px}}
+
+.track-section .heading-title h2{margin:7px 0 0;font-size:clamp(25px,3vw,36px);color:var(--deep)}
+.competition-state{margin:12px 0 24px}
+.competition-view{margin:20px 0 30px}
+.competition-view h3,.historical-heading h3{margin:0;font-size:18px;color:var(--deep)}
+.historical-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:28px 0 12px}
+.historical-heading .select-wrap{margin:0}
+.scoreboard-comparison{table-layout:auto;min-width:1040px}
+.scoreboard-comparison tbody th{font-size:15px;white-space:nowrap}
+.scoreboard-comparison td{font-size:19px;letter-spacing:0;white-space:nowrap}
+.scoreboard-comparison td small{font-size:10px;line-height:1.5;white-space:normal;max-width:160px;margin:5px auto 0}
+.scoreboard-comparison tbody tr:last-child{background:transparent}
+.leaderboard-empty{text-align:center!important;color:var(--muted);font-size:14px!important;white-space:normal!important}
+.scoreboard-scroll:focus-visible{outline:2px solid var(--deep);outline-offset:3px}
+.scoreboard-help p{line-height:1.65}
+@media(max-width:560px){.historical-heading{align-items:flex-start;flex-direction:column;gap:10px}.historical-heading .select-wrap{width:100%;justify-content:space-between}.track-section .heading-title h2{font-size:26px}}

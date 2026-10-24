@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {scoreMatchOScore,summarizeOScoreMatches} from '../lib/o-score.mjs';
+import {scoreMatchOScore,summarizeOScoreMatches,summarizeSharedOScoreMatches} from '../lib/o-score.mjs';
 
 const agents=['exact','one-off','short','draw','away','missing-a','missing-b'];
 
@@ -49,7 +49,28 @@ test('O Score diagnostics keep earned, mean-assigned and unavailable counts sepa
     {status:'cancelled',actualScore:[2,1],forecasts:{exact:{outcome:'home',score:[2,1]}}},
   ],['exact','one-off','missing-a']);
 
-  assert.deepEqual(summary.exact,{earnedCount:2,meanAssignedCount:0,sampleCount:2,total:2,average:1});
-  assert.deepEqual(summary['one-off'],{earnedCount:1,meanAssignedCount:1,sampleCount:2,total:3,average:1.5});
-  assert.deepEqual(summary['missing-a'],{earnedCount:0,meanAssignedCount:2,sampleCount:2,total:2.5,average:1.25});
+  assert.deepEqual(summary.exact,{eligibleMatchCount:3,submittedCount:2,missingCount:1,earnedCount:2,meanAssignedCount:0,unavailableCount:1,sampleCount:2,total:2,average:1});
+  assert.deepEqual(summary['one-off'],{eligibleMatchCount:3,submittedCount:1,missingCount:2,earnedCount:1,meanAssignedCount:1,unavailableCount:1,sampleCount:2,total:3,average:1.5});
+  assert.deepEqual(summary['missing-a'],{eligibleMatchCount:3,submittedCount:0,missingCount:3,earnedCount:0,meanAssignedCount:2,unavailableCount:1,sampleCount:2,total:2.5,average:1.25});
+});
+
+test('shared O Score diagnostics use only completed matches with every agent forecast',()=>{
+  const scored={
+    exact:{outcome:'home',score:[2,1]},one:{outcome:'home',score:[3,1]},
+    short:{outcome:'draw',score:[2,2]},away:{outcome:'home',score:[1,0]},
+    missingA:{outcome:'away',score:[0,3]},
+  };
+  const result=summarizeSharedOScoreMatches([
+    {status:'completed',actualScore:[2,1],forecasts:scored},
+    {status:'completed',actualScore:[0,0],forecasts:{...scored,missingA:undefined}},
+    {status:'cancelled',actualScore:null,forecasts:scored},
+  ],['exact','one','short','away','missingA']);
+  assert.equal(result.scope,'shared_all_agents');
+  assert.equal(result.resolved,1);
+  assert.equal(result.providerSummaries.exact.total,0);
+  assert.equal(result.providerSummaries.exact.sampleCount,1);
+  assert.equal(result.providerSummaries.exact.submittedCount,1);
+  assert.equal(result.providerSummaries.exact.missingCount,0);
+  assert.equal(result.providerSummaries.missingA.total,5);
+  assert.equal(result.providerSummaries.missingA.meanAssignedCount,0);
 });
