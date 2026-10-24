@@ -49,6 +49,29 @@ test('active rows follow scoped rank order and use scoped coverage counts',()=>{
   assert.doesNotMatch(view.rows,/99 submitted|98 missing|95 scored/);
 });
 
+test('active unranked agents have no fabricated coverage when only one agent has a sample',()=>{
+  const activeWeek={...week,complete:true,counts:{fixtures:1,completed:1,remaining:0,cancelled:0},
+    competitionSummaries:{jev:{...competitionSummary(2),submittedCount:1,missingCount:0,earnedCount:1,
+      meanAssignedCount:0,sampleCount:1}}};
+  const view=renderGameweekView({agents,competition:{active:true,includedFixtureBoundary:42},gameweeks:[activeWeek]});
+
+  assert.match(view.message,/Gameweek 2 winner: Jev/);
+  assert.match(view.rows,/2\.000<small>1 submitted · 0 missing<\/small><small>1 earned · 0 mean-assigned · 1 scored/);
+  assert.match(view.rows,/Jev[\s\S]*<\/tr><tr><td>—<\/td><th scope="row">Decisions API<\/th><td>—<small>0 submitted · 0 missing<\/small><small>0 earned · 0 mean-assigned · 0 scored/);
+  assert.match(view.rows,/Claude<\/th><td>—<small>0 submitted · 0 missing/);
+});
+
+test('a completed all-missing active round has no score or winner',()=>{
+  const activeWeek={...week,complete:true,counts:{fixtures:1,completed:1,remaining:0,cancelled:0},
+    competitionSummaries:Object.fromEntries(agents.map(agent=>[agent.id,{sampleCount:0}]))};
+  const view=renderGameweekView({agents,competition:{active:true,includedFixtureBoundary:42},gameweeks:[activeWeek]});
+
+  assert.match(view.message,/No agent has an O Score sample/);
+  assert.doesNotMatch(view.message,/winner/i);
+  assert.equal((view.rows.match(/<td>—<\/td>/g)||[]).length,agents.length);
+  assert.equal((view.rows.match(/0 submitted · 0 missing/g)||[]).length,agents.length);
+});
+
 test('settled active gameweeks name joint winners and current rounds are selected by default',()=>{
   const weeks=[{...week,gameweek:1,counts:{fixtures:1,completed:1,remaining:0,cancelled:0},complete:true,
       competitionSummaries:{jev:competitionSummary(1),openai:competitionSummary(1),claude:competitionSummary(2)}},
