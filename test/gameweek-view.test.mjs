@@ -21,6 +21,20 @@ test('disabled gameweek history shows completed and remaining counts without ran
   assert.doesNotMatch(view.message,/winner/i);
 });
 
+test('inactive gameweek with no scored samples shows dashes but retains exact-result percentages',()=>{
+  const emptyWeek={...week,counts:{fixtures:0,completed:0,remaining:0,cancelled:2},complete:false,
+    providerSummaries:Object.fromEntries(agents.map(agent=>[agent.id,summary(0)])),
+    oScoreSummaries:Object.fromEntries(agents.map(agent=>[agent.id,{total:0,average:0,submittedCount:0,missingCount:0,
+      earnedCount:0,meanAssignedCount:0,sampleCount:0}]))};
+  const view=renderGameweekView({agents,competition:{active:false,includedFixtureBoundary:null},gameweeks:[emptyWeek]});
+
+  assert.doesNotMatch(view.rows,/0\.000/);
+  assert.equal((view.rows.match(/<td>—<small>0 submitted · 0 missing/g)||[]).length,agents.length);
+  assert.equal((view.rows.match(/<\/small><\/td><td>—<small>per scored match/g)||[]).length,agents.length);
+  assert.equal((view.rows.match(/0%<small>0 of 1 forecasts<\/small>/g)||[]).length,agents.length);
+  assert.match(view.rows,/0 earned · 0 mean-assigned · 0 scored/);
+});
+
 test('active unfinished gameweeks show provisional standings but do not name a winner',()=>{
   const activeWeek={...week,competitionSummaries:Object.fromEntries(agents.map(agent=>[agent.id,competitionSummary(1.5)]))};
   const view=renderGameweekView({agents,competition:{active:true,includedFixtureBoundary:42},gameweeks:[activeWeek]});
