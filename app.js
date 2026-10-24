@@ -2,8 +2,9 @@ import {fixtureFreshness} from './fixture-freshness.mjs';
 import {forecastNotice} from './forecast-view.mjs';
 import {renderMatchCard} from './match-card.mjs';
 import {renderCompetitionStandings,renderHistoricalLeaderboard} from './leaderboard.mjs';
+import {renderGameweekView} from './gameweek-view.mjs';
 const $=s=>document.querySelector(s);
-let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null;
+let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null,selectedGameweek=null;
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(date,options)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',...options}).format(new Date(date));
 const dateKey=m=>m.kickoff?fmt(m.kickoff,{year:'numeric',month:'2-digit',day:'2-digit'}):'TBC';
@@ -43,6 +44,18 @@ function renderScoreboard(){
   $('#competition-state').textContent=competition.message;
   $('#competition-view').hidden=!competition.active;
   $('#competition-list').innerHTML=competition.rows;
+  renderGameweek();
+}
+function renderGameweek(){
+  if(!trackRecord)return;
+  const view=renderGameweekView(trackRecord,selectedGameweek);
+  selectedGameweek=view.selectedGameweek;
+  const select=$('#gameweek-score-scope');
+  select.innerHTML=view.options||'<option value="">No gameweeks available</option>';
+  select.value=selectedGameweek===null?'':String(selectedGameweek);
+  $('#gameweek-score-head').innerHTML=view.headers;
+  $('#gameweek-score-list').innerHTML=view.rows;
+  $('#gameweek-score-notice').textContent=view.message;
 }
 async function loadResults(page=1,append=false){
   try{
@@ -58,11 +71,12 @@ async function loadResults(page=1,append=false){
     else if(!append)$('#results-list').innerHTML='<tr><td colspan="6" class="empty">No fixtures have finished yet this season.</td></tr>';
     $('#results-notice').textContent=resultsTotal?`Showing ${Math.min(resultsTotal,resultsPage*d.pageSize)} of ${resultsTotal} fixtures.`:'No completed fixtures.';
     $('#results-load-more').hidden=!d.hasMore;
-  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');}
+  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');}
 }
 function showView(view){$('#upcoming-view').hidden=view!=='upcoming';$('#results-view').hidden=view!=='results';$('#view-upcoming').setAttribute('aria-pressed',String(view==='upcoming'));$('#view-results').setAttribute('aria-pressed',String(view==='results'));$('#fixture-title').firstChild.textContent=view==='upcoming'?'Predictions':'Results';$('#shown-count').hidden=view!=='upcoming';}
 $('#view-upcoming').addEventListener('click',()=>showView('upcoming'));$('#view-results').addEventListener('click',()=>showView('results'));
 $('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').addEventListener('input',()=>{limit=30;render();});$('#load-more').addEventListener('click',()=>{limit+=30;render();});$('#refresh').addEventListener('click',()=>load());
 $('#scoreboard-scope').addEventListener('change',renderScoreboard);
+$('#gameweek-score-scope').addEventListener('change',event=>{selectedGameweek=Number(event.target.value)||null;renderGameweek();});
 $('#results-load-more').addEventListener('click',()=>loadResults(resultsPage+1,true));
 load();loadResults();
