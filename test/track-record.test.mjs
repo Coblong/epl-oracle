@@ -33,7 +33,7 @@ test('provider-only fixtures count in full histories but not the shared comparis
   const {providerSummaries:full,sharedComparison:shared}=trackRecordSummaries([
     row(1,'jev'),row(1,'openai',{...forecast(),outcome:'draw',score:[1,1]}),
     row(2,'jev'),row(3,'openai',forecast(),[0,1]),
-  ]);
+  ],['jev','openai']);
   assert.equal(full.jev.resolved,2);
   assert.equal(full.jev.outcomeCorrect,2);
   assert.equal(full.openai.resolved,2);
@@ -49,7 +49,7 @@ test('paired Brier excludes both providers when either has missing evidence but 
   const missing={...forecast(),probabilities:undefined};
   const {providerSummaries:full,sharedComparison:shared}=trackRecordSummaries([
     row(1,'jev'),row(1,'openai'),row(2,'jev'),row(2,'openai',missing),
-  ]);
+  ],['jev','openai']);
   assert.equal(full.jev.brierSampleCount,2);
   assert.equal(full.openai.brierSampleCount,1);
   for(const provider of ['jev','openai']){
@@ -76,4 +76,20 @@ test('empty histories have zero counts and no accuracy or Brier values',()=>{
     assert.deepEqual(summaries[provider],{resolved:0,outcomeCorrect:0,outcomeAccuracy:null,
       scoreCorrect:0,scoreAccuracy:null,brierSampleCount:0,brierScore:null});
   }
+});
+
+test('the five-agent comparison has a common fixture and Brier denominator while retaining older pair histories',()=>{
+  const ids=['jev','openai','claude','chatgpt','gemini'];
+  const rows=[row(1,'jev'),row(1,'openai'),...ids.map(id=>row(2,id)),
+    ...ids.map(id=>row(3,id,id==='gemini'?{...forecast(),probabilities:null}:forecast()))];
+  const {providerSummaries,sharedComparison}=trackRecordSummaries(rows);
+  assert.deepEqual(sharedComparison.providerIds,ids);
+  assert.equal(providerSummaries.jev.resolved,3);assert.equal(providerSummaries.gemini.resolved,2);
+  assert.equal(sharedComparison.resolved,2);
+  for(const id of ids){
+    assert.equal(sharedComparison.providerSummaries[id].resolved,2);
+    assert.equal(sharedComparison.providerSummaries[id].brierSampleCount,1);
+    near(sharedComparison.providerSummaries[id].brierScore,.245);
+  }
+  assert.equal(trackRecordSummaries(rows,['jev','openai']).sharedComparison.resolved,3);
 });

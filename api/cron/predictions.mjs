@@ -1,8 +1,7 @@
 import {getStore} from '../../lib/store.mjs';
 import {generateWeeklyPredictions, weeklyRunContext} from '../../lib/weekly-predictions.mjs';
 import {authorizeCron} from '../../lib/cron-auth.mjs';
-import {predictMatch} from '../../lib/jev.mjs';
-import {predictDecision} from '../../lib/decisions.mjs';
+import {PREDICTORS} from '../../lib/providers.mjs';
 
 const json = (res, status, data) => {
   res.statusCode = status;
@@ -12,11 +11,11 @@ const json = (res, status, data) => {
 
 export default async function handler(req, res) {
   if (!authorizeCron(req)) return json(res, 401, {error: 'Unauthorized'});
-  const providers = {jev:predictMatch,openai:predictDecision};
+  const providers = PREDICTORS;
   const now = new Date();
   const context = weeklyRunContext(now);
   if (process.env.PERSISTENCE_BACKEND !== 'neon') return json(res, context ? 409 : 200, context
-    ? {error:'Dual-provider predictions require validated Neon persistence.'}
+    ? {error:'Weekly predictions require validated Neon persistence.'}
     : {ok:true,skipped:'Outside the weekly forecast recovery window.'});
   try {
     const store = getStore();

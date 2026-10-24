@@ -101,3 +101,7 @@ TEST_DATABASE_URL=postgresql://USER@127.0.0.1:PORT/DATABASE npm test
 Without `TEST_DATABASE_URL`, database integration tests are explicitly skipped. With it, tests create a randomly named schema, exercise the real PostgreSQL transactions and API handlers, and delete only that schema afterward. Never pass a connection string as a literal shell command for a remote credential; set it through the private environment instead.
 
 The database checks cover import parity and idempotence, migration of existing Jev history, rejection before validation, invalid-source and insert-failure rollback, immutable inputs, retained revisions, attempt status, concurrent writes, result corrections, provider-specific pre-kickoff forecasts, result pagination, postponed fixture states, duplicate refreshes and rejection of older fixture data.
+
+## Five-agent migration
+
+Automatic migration `003-five-agents` expands the result-agent constraint to Jev, Decisions API, Claude, ChatGPT and Gemini, and adds per-attempt status and usage history. Existing forecasts, evaluations, snapshots and migration checksums are retained. It does not backfill audit history or regenerate predictions. The normal deployment migration runner applies it transactionally before the new application starts. See [prediction agents](prediction-agents.md) for configuration and verification. For an application rollback, retain the expanded constraint and audit table so the older code can read its original agents without deleting newer history.

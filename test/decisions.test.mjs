@@ -115,3 +115,13 @@ test('OpenAI makes one score-only HTTP request and derives the forecast from ret
     assert.equal(prediction.model,'gpt-6-luna');assert.equal(prediction.method,'score-distribution-result-first-v1');
   }finally{globalThis.fetch=original;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
 });
+
+test('Decisions retains available usage and estimates input-only request cost including cache hits',async t=>{
+  const key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='test-only-key';
+  try {
+    t.mock.method(globalThis,'fetch',async()=>Response.json({...response(),usage:{input_tokens:1000,output_tokens:200,
+      input_tokens_details:{cached_tokens:100,cache_write_tokens:0}}}));
+    const p=await predictDecision(match);
+    assert.equal(p.usage.inputTokens,1000);assert.equal(p.cost.amount,.000091);
+  } finally {if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;}
+});
