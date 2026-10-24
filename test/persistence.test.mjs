@@ -14,6 +14,9 @@ import {generateWeeklyPredictions as runWeekly} from '../lib/weekly-predictions.
 import {parsePrediction} from '../lib/football.mjs';
 import {scoreAnswer} from './support/score-distribution.mjs';
 import {forecastPanel} from '../forecast-view.mjs';
+import {renderResultCard} from '../result-card.mjs';
+import {renderGameweekView} from '../gameweek-view.mjs';
+import {renderCompetitionStandings} from '../leaderboard.mjs';
 
 const enabled=!!process.env.TEST_DATABASE_URL;
 const schema='epl_oracle_test_'+randomUUID().replaceAll('-','');
@@ -978,6 +981,77 @@ dbtest('all five agents survive the weekly job and appear in read APIs and compl
   assert.equal(completed.sharedComparison.oScoreDiagnostics.resolved,1);
   assert.equal(completed.sharedComparison.oScoreDiagnostics.providerSummaries.jev.total,0);
   assert.equal(completed.sharedComparison.oScoreDiagnostics.providerSummaries.gemini.sampleCount,1);
+});
+
+dbtest('five-provider evidence flows through corrected results and O Score views without activating competition',async()=>{
+  const ids=['jev','openai','claude','chatgpt','gemini'];
+  const kickoff=['2099-10-09T12:00:00Z','2099-10-10T12:00:00Z','2099-10-11T12:00:00Z'];
+  const matches=kickoff.map((date,index)=>({...structuredClone(match),id:101+index,gameweek:7,kickoff:date}));
+  const source=baseline();source.fixtures={...source.fixtures,matches,updatedAt:'2099-10-07T07:59:00Z'};source.predictions={};source.results=[];
+  await store.importSnapshot(source);
+  const scoreGrid={
+    101:{jev:[5,0],openai:[4,0],claude:[1,0],chatgpt:[2,2],gemini:[0,5]},
+    102:{jev:[4,1],openai:[4,0],claude:null,chatgpt:null,gemini:[3,1]},
+    103:{jev:null,openai:null,claude:null,chatgpt:null,gemini:null},
+  };
+  const evidence=[];
+  const providers=Object.fromEntries(ids.map(id=>[id,async input=>{
+    evidence.push({provider:id,matchId:input.id,input:structuredClone(input)});
+    const score=scoreGrid[input.id][id];
+    if(!score)throw new Error('mock provider unavailable');
+    const outcome=score[0]===score[1]?'draw':score[0]>score[1]?'home':'away';
+    return {outcome,score,probabilities:{home:.6,draw:.25,away:.15},model:id,generatedAt:'2099-10-07T08:00:00Z'};
+  }]));
+  assert.deepEqual(await generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{}),{targeted:3,updated:8,failed:7});
+  assert.equal(evidence.length,15);
+  for(const m of matches){
+    const copies=evidence.filter(item=>item.matchId===m.id).map(item=>item.input);
+    assert.equal(copies.length,5);
+    for(const copy of copies)assert.deepEqual(copy,m);
+  }
+  const completedRaw=matches.map((m,index)=>({id:m.id,event:7,kickoff_time:m.kickoff,team_h:1,team_a:2,team_h_score:[5,4,2][index],team_a_score:[0,1,2][index],finished:true}));
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-12T15:00:00Z',raw:completedRaw});
+  const api=await response(resultsHandler);
+  assert.equal(api.competition.active,false);
+  assert.equal(api.competition.includedFixtureBoundary,null);
+  assert.deepEqual(api.agents.map(agent=>agent.id),ids);
+  assert.equal(api.results.length,3);
+  const scores=Object.fromEntries(ids.map(id=>[id,api.results.find(row=>row.id===101).oScores[id].value]));
+  assert.deepEqual(scores,{jev:0,openai:1,claude:4,chatgpt:6,gemini:11});
+  const allMissing=api.results.find(row=>row.id===103);
+  assert.deepEqual(allMissing.actualScore,[2,2]);
+  assert.deepEqual(allMissing.missingProviders,ids);
+  assert.ok(ids.every(id=>allMissing.oScores[id].value===null));
+  const fractional=api.results.find(row=>row.id===102);
+  assert.equal(fractional.oScores.claude.source,'mean_assigned');
+  assert.equal(fractional.oScores.claude.value,2/3);
+  assert.equal(fractional.oScores.chatgpt.value,2/3);
+  assert.equal(api.providerSummaries.jev.oScoreDiagnostics.sampleCount,2);
+  assert.equal(api.providerSummaries.claude.oScoreDiagnostics.earnedCount,1);
+  assert.equal(api.providerSummaries.claude.oScoreDiagnostics.meanAssignedCount,1);
+  assert.equal(api.providerSummaries.claude.resolved,1);
+  assert.equal(api.providerSummaries.claude.brierSampleCount,1);
+  assert.equal(api.gameweeks.find(week=>week.gameweek===7).counts.completed,3);
+  assert.equal(api.gameweeks.find(week=>week.gameweek===7).counts.remaining,0);
+  assert.equal(api.gameweeks.find(week=>week.gameweek===7).oScoreSummaries.claude.sampleCount,2);
+  assert.match(renderResultCard(allMissing),/Final score 2 : 2/);
+  assert.match(renderResultCard(allMissing),/No prediction/);
+  assert.match(renderResultCard(allMissing),/No earned O Score exists/);
+  assert.doesNotMatch(renderResultCard(allMissing),/O Score<\/span><strong>0/);
+  assert.equal(renderCompetitionStandings(api).active,false);
+  assert.match(renderGameweekView(api).message,/Competition has not started/);
+  const attemptCount=evidence.length;
+  await response(resultsHandler);
+  assert.equal(evidence.length,attemptCount,'read API must not invoke providers');
+
+  const correctedRaw=completedRaw.map(row=>row.id===101?{...row,team_h_score:5,team_a_score:1}:row);
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-13T15:00:00Z',raw:correctedRaw});
+  const corrected=await response(resultsHandler);
+  assert.equal(corrected.competition.active,false);
+  assert.deepEqual(Object.fromEntries(ids.map(id=>[id,corrected.results.find(row=>row.id===101).oScores[id].value])),{jev:1,openai:2,claude:5,chatgpt:5,gemini:10});
+  assert.equal(corrected.providerSummaries.claude.oScoreDiagnostics.total,17/3);
+  assert.equal(corrected.gameweeks.find(week=>week.gameweek===7).oScoreSummaries.claude.total,17/3);
+  assert.match(renderResultCard(corrected.results.find(row=>row.id===101)),/Final score 5 : 1/);
 });
 
 dbtest('failed paid responses retain usage per attempt and retry without replacing successful agents or old forecasts',async()=>{

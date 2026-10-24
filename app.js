@@ -53,12 +53,15 @@ async function loadResults(page=1,append=false){
     $('#results-competition-notice').textContent=resultsCompetitionNotice(d.competition);
     $('#track-notice').classList.remove('error');
     $('#results-notice').classList.remove('error');
+    $('#gameweek-score-notice').classList.remove('error');
+    $('#competition-state').classList.remove('error');
+    $('#results-retry').hidden=true;
     if(!append)$('#results-list').innerHTML='';
     if(d.results.length)$('#results-list').insertAdjacentHTML('beforeend',d.results.map(result=>renderResultCard(result)).join(''));
     else if(!append)$('#results-list').innerHTML='<div class="empty">No fixtures have finished yet this season.</div>';
     $('#results-notice').textContent=resultsTotal?`Showing ${Math.min(resultsTotal,resultsPage*d.pageSize)} of ${resultsTotal} fixtures.`:'No completed fixtures.';
     $('#results-load-more').hidden=!d.hasMore;
-  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');}
+  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');$('#competition-state').textContent='Competition status unavailable. Retry loading results.';$('#competition-state').classList.add('error');$('#results-retry').hidden=false;}
 }
 function showView(view){$('#upcoming-view').hidden=view!=='upcoming';$('#results-view').hidden=view!=='results';$('#view-upcoming').setAttribute('aria-pressed',String(view==='upcoming'));$('#view-results').setAttribute('aria-pressed',String(view==='results'));$('#fixture-title').firstChild.textContent=view==='upcoming'?'Predictions':'Results';$('#shown-count').hidden=view!=='upcoming';}
 $('#view-upcoming').addEventListener('click',()=>showView('upcoming'));$('#view-results').addEventListener('click',()=>showView('results'));
@@ -66,4 +69,5 @@ $('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').
 $('#scoreboard-scope').addEventListener('change',renderScoreboard);
 $('#gameweek-score-scope').addEventListener('change',event=>{selectedGameweek=Number(event.target.value)||null;renderGameweek();});
 $('#results-load-more').addEventListener('click',()=>loadResults(resultsPage+1,true));
+$('#results-retry').addEventListener('click',()=>loadResults());
 load();loadResults();
