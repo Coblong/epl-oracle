@@ -18,24 +18,24 @@ dbtest('deployment migrations do nothing after the manual retry baseline is regi
   const second=await runSchemaMigrations(pool,schema);
   assert.deepEqual(first,{applied:[],registered:[]});
   assert.deepEqual(second,first);
-  assert.equal((await migrationHistory(pool,schema)).length,2);
+  assert.equal((await migrationHistory(pool,schema)).length,3);
 });
 
 dbtest('overlapping deployment migrations apply a pending version exactly once',async()=>{
-  const migrations=[...await schemaMigrations(),{version:'003-probe',mode:'automatic',sql:'CREATE TABLE epl_oracle.migration_probe (id integer PRIMARY KEY);'}];
+  const migrations=[...await schemaMigrations(),{version:'004-probe',mode:'automatic',sql:'CREATE TABLE epl_oracle.migration_probe (id integer PRIMARY KEY);'}];
   const reports=await Promise.all([runSchemaMigrations(pool,schema,{migrations}),runSchemaMigrations(pool,schema,{migrations})]);
   assert.equal(reports.flatMap(report=>report.applied).length,1);
-  assert.equal((await migrationHistory(pool,schema)).length,3);
+  assert.equal((await migrationHistory(pool,schema)).length,4);
   assert.deepEqual(await runSchemaMigrations(pool,schema,{migrations}),{applied:[],registered:[]});
 });
 
 dbtest('a failed pending migration rolls back its SQL and ledger entry together',async()=>{
   const baseline=await schemaMigrations();
-  const migration={version:'003-failing-probe',mode:'automatic',sql:'CREATE TABLE epl_oracle.rollback_probe (id integer); SELECT missing_column FROM epl_oracle.rollback_probe;'};
+  const migration={version:'004-failing-probe',mode:'automatic',sql:'CREATE TABLE epl_oracle.rollback_probe (id integer); SELECT missing_column FROM epl_oracle.rollback_probe;'};
   await assert.rejects(runSchemaMigrations(pool,schema,{migrations:[...baseline,migration]}),/missing_column/);
-  assert.equal((await migrationHistory(pool,schema)).length,2);
+  assert.equal((await migrationHistory(pool,schema)).length,3);
   const corrected={...migration,sql:'CREATE TABLE epl_oracle.rollback_probe (id integer);'};
-  assert.deepEqual((await runSchemaMigrations(pool,schema,{migrations:[...baseline,corrected]})).applied,['003-failing-probe']);
+  assert.deepEqual((await runSchemaMigrations(pool,schema,{migrations:[...baseline,corrected]})).applied,['004-failing-probe']);
 });
 
 dbtest('changing an already applied migration fails without replacing its checksum',async()=>{
@@ -48,8 +48,8 @@ dbtest('changing an already applied migration fails without replacing its checks
 
 dbtest('an older verified retry upgrade is registered without rerunning its SQL',async()=>{
   await pool.query(`DELETE FROM "${schema}".schema_migrations`);
-  assert.deepEqual(await runSchemaMigrations(pool,schema),{applied:['002-results'],registered:['001-retry-status']});
-  assert.equal((await migrationHistory(pool,schema)).length,2);
+  assert.deepEqual(await runSchemaMigrations(pool,schema),{applied:['002-results','003-five-agents'],registered:['001-retry-status']});
+  assert.equal((await migrationHistory(pool,schema)).length,3);
 });
 
 dbtest('the results migration does not copy legacy history into the new Results view',async()=>{
@@ -87,5 +87,5 @@ dbtest('deployment refuses the initial retry upgrade until its manual checkpoint
 dbtest('deployment refuses a missing manual checkpoint even when its ledger entry exists',async()=>{
   await pool.query(`DELETE FROM "${schema}".metadata WHERE key='retry_schema_v1'`);
   await assert.rejects(runSchemaMigrations(pool,schema),/writers paused.*six-minute drain/);
-  assert.equal((await migrationHistory(pool,schema)).length,2);
+  assert.equal((await migrationHistory(pool,schema)).length,3);
 });

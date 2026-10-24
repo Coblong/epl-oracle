@@ -1,3 +1,5 @@
+import {AGENTS,AGENT_IDS} from '../agents.mjs';
+import {providersConfigured} from '../lib/providers.mjs';
 import {fixtureFreshness} from '../fixture-freshness.mjs';
 import {getStore} from '../lib/store.mjs';
 import {fingerprint} from '../lib/migration.mjs';
@@ -32,7 +34,7 @@ export default async function handler(req, res) {
           forecasts[provider] = {...forecast.prediction, provider, stale};
         }
         const forecastStates = {};
-        for (const provider of ['jev','openai']) {
+        for (const provider of AGENT_IDS) {
           const attempt = forecastAttempts?.[m.id]?.[provider];
           const forecast = providerPredictions?.[m.id]?.[provider];
           forecastStates[provider] = {...attempt, availability: forecastAvailability(forecast,attempt,expectedRunKey,forecasts[provider] ? forecasts[provider].stale : false)};
@@ -45,7 +47,8 @@ export default async function handler(req, res) {
       updatedAt: fixtures.updatedAt,
       fixtureRefresh:fixtureFreshness(fixtures.updatedAt,now),
       configured: !!process.env.AI_GATEWAY_API_KEY,
-      providersConfigured:{jev:!!process.env.AI_GATEWAY_API_KEY, openai:!!process.env.OPENAI_API_KEY},
+      agents:AGENTS,
+      providersConfigured:providersConfigured(),
     });
   } catch (e) {
     console.error(e);

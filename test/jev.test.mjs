@@ -36,3 +36,12 @@ test('Jev rejects incomplete score evidence without an internal retry',async()=>
     await assert.rejects(predictMatch(match),/incomplete or invalid/);assert.equal(calls,1);
   }finally{globalThis.fetch=original;if(key===undefined)delete process.env.AI_GATEWAY_API_KEY;else process.env.AI_GATEWAY_API_KEY=key;}
 });
+
+test('Jev retains returned model and usage without inventing an unavailable price',async t=>{
+  const key=process.env.AI_GATEWAY_API_KEY;process.env.AI_GATEWAY_API_KEY='test-only-key';
+  try {
+    t.mock.method(globalThis,'fetch',async()=>Response.json({...scoreAnswer(),model:'typesafe-ai/jev-v2',usage:{input_tokens:1000,output_tokens:0}}));
+    const p=await predictMatch(match);
+    assert.equal(p.model,'typesafe-ai/jev-v2');assert.equal(p.usage.inputTokens,1000);assert.equal(p.cost,null);
+  }finally{if(key===undefined)delete process.env.AI_GATEWAY_API_KEY;else process.env.AI_GATEWAY_API_KEY=key;}
+});

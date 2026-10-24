@@ -1,3 +1,4 @@
+import {runSchemaMigrations} from '../lib/schema-migrations.mjs';
 import {test, before, beforeEach, after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -301,14 +302,14 @@ dbtest('Results use each provider latest pre-reschedule forecast and official sc
   assert.equal(first.forecasts.openai.prediction.outcome,'away');
   assert.equal(first.forecasts.openai.correctOutcome,false);
   assert.equal(first.forecasts.openai.correctScore,true);
-  assert.deepEqual(page.results.find(result=>result.id===12).missingProviders,['openai']);
+  assert.deepEqual(page.results.find(result=>result.id===12).missingProviders,['openai','claude','chatgpt','gemini']);
   assert.equal(page.providerSummaries.jev.resolved,2);
   assert.equal(page.providerSummaries.jev.outcomeCorrect,2);
   assert.equal(page.providerSummaries.jev.brierSampleCount,2);
   assert.equal(page.providerSummaries.openai.resolved,1);
-  assert.equal(page.sharedComparison.resolved,1);
-  assert.equal(page.sharedComparison.providerSummaries.jev.resolved,1);
-  assert.equal(page.sharedComparison.providerSummaries.openai.resolved,1);
+  assert.equal(page.sharedComparison.resolved,0);
+  assert.equal(page.sharedComparison.providerSummaries.jev.resolved,0);
+  assert.equal(page.sharedComparison.providerSummaries.openai.resolved,0);
   const smallerPage=await store.getResultsPage({page:1,pageSize:1});
   assert.equal(smallerPage.results.length,1);
   assert.deepEqual(smallerPage.providerSummaries,page.providerSummaries);
@@ -326,11 +327,11 @@ dbtest('Results use each provider latest pre-reschedule forecast and official sc
   assert.equal(page.providerSummaries.jev.outcomeCorrect,1);
   assert.equal(page.providerSummaries.openai.outcomeCorrect,1);
   assert.equal(page.sharedComparison.providerSummaries.jev.outcomeCorrect,0);
-  assert.equal(page.sharedComparison.providerSummaries.openai.outcomeCorrect,1);
-  assert.ok(Math.abs(page.sharedComparison.providerSummaries.jev.brierScore-1.145)<1e-12);
+  assert.equal(page.sharedComparison.providerSummaries.openai.outcomeCorrect,0);
+  assert.equal(page.sharedComparison.providerSummaries.jev.brierScore,null);
   const api=await response(resultsHandler,{method:'GET',url:'/api/results?page=1'});
   assert.equal(api.results.find(result=>result.id===11).forecasts.openai.correctOutcome,true);
-  assert.deepEqual(api.results.find(result=>result.id===12).missingProviders,['openai']);
+  assert.deepEqual(api.results.find(result=>result.id===12).missingProviders,['openai','claude','chatgpt','gemini']);
 });
 
 dbtest('daily refresh settles provisional final scores, retains both pre-kickoff forecasts, and leaves an unconfirmed 90-minute match unresolved',async()=>{
@@ -540,20 +541,20 @@ dbtest('visitors see retained and missing forecasts after a failed provider refr
   assert.ok(!JSON.stringify(live).includes('private credential'));
 });
 
-dbtest('the weekly cron records missing credentials as failures for both expected providers',async t=>{
+dbtest('the weekly cron records missing credentials as failures for all five expected agents',async t=>{
   const source=baseline();source.predictions={};
   source.fixtures.updatedAt='2099-10-07T08:00:00Z';
   source.fixtures.matches[0]={...match,kickoff:'2099-10-08T12:00:00Z'};
   await store.importSnapshot(source);
-  const saved=Object.fromEntries(['AI_GATEWAY_API_KEY','OPENAI_API_KEY','CRON_SECRET'].map(key=>[key,process.env[key]]));
+  const saved=Object.fromEntries(['AI_GATEWAY_API_KEY','OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','CRON_SECRET'].map(key=>[key,process.env[key]]));
   try {
     for(const key of Object.keys(saved))delete process.env[key];
     t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-07T08:00:00Z')});
     const stats=await response(predictionsHandler);
-    assert.equal(stats.failed,2);
+    assert.equal(stats.failed,5);
     assert.equal(stats.updated,0);
     const live=(await response(fixturesHandler)).matches[0];
-    for(const provider of ['jev','openai']){
+    for(const provider of ['jev','openai','claude','chatgpt','gemini']){
       assert.equal(live.forecastStates[provider].status,'failed');
       assert.equal(live.forecastStates[provider].availability,'missing');
       assert.equal(live.predictions[provider],undefined);
@@ -739,7 +740,7 @@ dbtest('scoreboard includes prior seasons and excludes post-kickoff or ineligibl
   assert.equal(page.results.length,1);
   assert.equal(page.providerSummaries.jev.resolved,2);
   assert.equal(page.providerSummaries.openai.resolved,1);
-  assert.equal(page.sharedComparison.resolved,1);
+  assert.equal(page.sharedComparison.resolved,0);
   await pool.query(`UPDATE "${schema}".result_predictions SET eligible=false,correct_outcome=NULL,correct_score=NULL WHERE fixture_id=82`);
   page=await store.getResultsPage();
   assert.equal(page.providerSummaries.jev.resolved,1);
@@ -812,4 +813,160 @@ dbtest('predictions remain visible after kickoff and in-progress refresh until a
   const result=(await store.getResultsPage()).results[0];
   assert.deepEqual(result.actualScore,[2,1]);
   for(const provider of ['jev','openai'])assert.deepEqual(result.forecasts[provider].prediction.score,[2,1]);
+});
+
+dbtest('all five agents survive the weekly job and appear in read APIs and completed evaluations',async()=>{
+  const ids=['jev','openai','claude','chatgpt','gemini'];
+  const source=baseline();source.predictions={};source.fixtures.updatedAt='2099-10-07T07:59:00Z';
+  await store.importSnapshot(source);
+  const seen=[];
+  const providers=Object.fromEntries(ids.map(provider=>[provider,async input=>{
+    seen.push(structuredClone(input));input.home.name='mutation';
+    return {...prediction,model:provider,generatedAt:'2099-10-07T08:00:00Z'};
+  }]));
+  assert.deepEqual(await generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{}),{targeted:1,updated:5,failed:0});
+  assert.deepEqual(seen,ids.map(()=>match));
+  const upcoming=await response(fixturesHandler);
+  assert.deepEqual(upcoming.agents.map(agent=>agent.id),ids);
+  assert.equal(upcoming.agents.find(agent=>agent.id==='openai').name,'Decisions API');
+  assert.deepEqual(Object.keys(upcoming.matches[0].forecastStates),ids);
+  assert.deepEqual(Object.keys(upcoming.providersConfigured),ids);
+  for(const id of ids)assert.equal(upcoming.matches[0].predictions[id].model,id);
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-12T15:00:00Z',raw:[{
+    id:match.id,event:2,kickoff_time:match.kickoff,team_h:1,team_a:2,team_h_score:2,team_a_score:1,finished:true,
+  }]});
+  const completed=await response(resultsHandler);
+  assert.deepEqual(completed.agents.map(agent=>agent.id),ids);
+  assert.deepEqual(completed.results[0].missingProviders,[]);
+  for(const id of ids){
+    assert.equal(completed.results[0].forecasts[id].correctScore,true);
+    assert.equal(completed.providerSummaries[id].resolved,1);
+  }
+  assert.equal(completed.sharedComparison.resolved,1);
+  assert.deepEqual(completed.sharedComparison.providerIds,ids);
+});
+
+dbtest('failed paid responses retain usage per attempt and retry without replacing successful agents or old forecasts',async()=>{
+  const source=baseline();source.fixtures.updatedAt='2099-10-07T07:59:00Z';await store.importSnapshot(source);
+  let claudeCalls=0,geminiCalls=0;
+  const metadata={model:'claude-haiku-5-5',usage:{inputTokens:100,outputTokens:200},cost:{amount:.00011,currency:'USD',estimated:true}};
+  const inputs=[];
+  const providers={claude:async input=>{
+    inputs.push(structuredClone(input));
+    if(++claudeCalls===1)throw Object.assign(new Error('Private refusal text'),{predictionMetadata:metadata});
+    return {...prediction,...metadata,generatedAt:'2099-10-07T08:15:00Z'};
+  },gemini:async()=>{geminiCalls++;return {...prediction,model:'gemini-3.1-flash-lite',generatedAt:'2099-10-07T08:00:00Z'};}};
+  assert.deepEqual(await generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{}),{targeted:1,updated:1,failed:1});
+  let live=(await response(fixturesHandler)).matches[0];
+  assert.equal(live.forecastStates.claude.status,'failed');assert.equal(live.predictions.claude,undefined);
+  assert.equal(live.predictions.jev.generatedAt,prediction.generatedAt);
+  const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z');
+  let state=await store.getRun(run.id);
+  assert.equal(state.attemptHistory.find(attempt=>attempt.provider==='claude').metadata.cost.amount,.00011);
+  assert.equal((await generateWeeklyPredictions(store,providers,'2099-10-07T08:14:59Z',async()=>{})).updated,0);
+  assert.deepEqual(await generateWeeklyPredictions(store,providers,'2099-10-07T08:15:00Z',async()=>{}),{targeted:1,updated:1,failed:0});
+  assert.equal(claudeCalls,2);assert.equal(geminiCalls,1);assert.deepEqual(inputs,[match,match]);
+  state=await store.getRun(run.id);
+  const history=state.attemptHistory.filter(attempt=>attempt.provider==='claude');
+  assert.deepEqual(history.map(attempt=>[attempt.attemptNumber,attempt.status]),[[1,'failed'],[2,'succeeded']]);
+  assert.ok(history.every(attempt=>attempt.metadata.model==='claude-haiku-5-5'));
+  assert.equal(state.predictions.find(entry=>entry.provider==='claude').data.usage.inputTokens,100);
+  assert.ok(!JSON.stringify(state).includes('Private refusal text'));
+});
+
+dbtest('the production cron wires all five HTTP adapters to identical evidence and retries only the invalid agent',async t=>{
+  const source=baseline();source.predictions={};source.fixtures.updatedAt='2099-10-07T08:00:00Z';
+  await store.importSnapshot(source);
+  const names=['AI_GATEWAY_API_KEY','OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','CRON_SECRET'];
+  const saved=Object.fromEntries(names.map(key=>[key,process.env[key]]));
+  let claudeCalls=0;
+  const evidence=[];
+  try {
+    for(const name of names)process.env[name]='test-only-key';delete process.env.CRON_SECRET;
+    t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-10-07T08:00:00Z')});
+    t.mock.method(globalThis,'fetch',async(url,options)=>{
+      const body=JSON.parse(options.body),answer=scoreAnswer({'1_1':.30,'2_1':.26,'1_0':.24,'0_1':.20},'1_1');
+      const text=JSON.stringify({scoreProbabilities:answer.answers.score.probabilities});
+      if(url.endsWith('/evaluate')) {evidence.push(body.state);return Response.json(answer);}
+      if(url.endsWith('/decisions')) {
+        evidence.push(JSON.parse(body.input));
+        return Response.json({model:'gpt-6-luna',answers:[{name:'score',type:'choice',choice:'1_1',
+          probabilities:Object.entries(answer.answers.score.probabilities).map(([value,probability])=>({value,probability}))}]});
+      }
+      if(url.endsWith('/messages')) {
+        evidence.push(JSON.parse(body.messages[0].content).evidence);claudeCalls++;
+        return Response.json({model:'claude-haiku-5-5',stop_reason:'end_turn',content:[{type:'text',text:claudeCalls===1?'{}':text}],usage:{input_tokens:100,output_tokens:200}});
+      }
+      if(url.endsWith('/responses')) {
+        evidence.push(JSON.parse(body.input).evidence);
+        return Response.json({model:'gpt-6.1-sol',status:'completed',output:[{type:'message',content:[{type:'output_text',text}]}]});
+      }
+      assert.ok(url.endsWith(':generateContent'));
+      evidence.push(JSON.parse(body.contents[0].parts[0].text).evidence);
+      return Response.json({modelVersion:'gemini-3.1-flash-lite',candidates:[{finishReason:'STOP',content:{parts:[{text}]}}]});
+    });
+    const first=await response(predictionsHandler);
+    assert.equal(first.updated,4);assert.equal(first.failed,1);
+    const live=(await response(fixturesHandler)).matches[0];
+    for(const id of ['jev','openai','chatgpt','gemini']){
+      assert.equal(live.predictions[id].outcome,'home');assert.deepEqual(live.predictions[id].score,[2,1]);
+      assert.equal(Object.keys(live.predictions[id].scoreProbabilities).length,49);
+    }
+    assert.equal(live.predictions.claude,undefined);assert.equal(live.forecastStates.claude.attemptCount,1);
+    assert.ok(evidence.every(input=>JSON.stringify(input)===JSON.stringify(evidence[0])));
+    t.mock.timers.setTime(Date.parse('2099-10-07T08:15:00Z'));
+    const retry=await response(predictionsHandler);
+    assert.equal(retry.updated,1);assert.equal(retry.failed,0);assert.equal(evidence.length,6);
+    assert.deepEqual(evidence[5],evidence[0]);
+    const final=await response(fixturesHandler);
+    assert.equal(final.matches[0].predictions.claude.model,'claude-haiku-5-5');
+    assert.ok(!JSON.stringify(final).includes('test-only-key'));
+  } finally {
+    t.mock.timers.reset();
+    for(const [key,value] of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+  }
+});
+
+dbtest('the five-agent migration preserves prior forecasts and evaluations without inventing attempt history',async()=>{
+  await store.importSnapshot(baseline());
+  const legacy=await store.beginRun('legacy-active:11');
+  assert.deepEqual((await store.getRun(legacy.id)).attemptHistory,[]);
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-12T15:00:00Z',raw:[{
+    id:match.id,event:2,kickoff_time:match.kickoff,team_h:1,team_a:2,team_h_score:2,team_a_score:1,finished:true,
+  }]});
+  const before=await store.getResultsPage();
+  const legacyBefore=await store.getResults();
+  await pool.query(`DROP TABLE "${schema}".attempt_history;
+    ALTER TABLE "${schema}".result_predictions DROP CONSTRAINT result_predictions_provider_check;
+    ALTER TABLE "${schema}".result_predictions ADD CONSTRAINT result_predictions_provider_check CHECK(provider IN ('jev','openai'));
+    DELETE FROM "${schema}".schema_migrations WHERE version='003-five-agents'`);
+  assert.deepEqual(await runSchemaMigrations(pool,schema),{applied:['003-five-agents'],registered:[]});
+  assert.deepEqual(await store.getResultsPage(),before);
+  assert.deepEqual(await store.getResults(),legacyBefore);
+  assert.deepEqual(await runSchemaMigrations(pool,schema),{applied:[],registered:[]});
+});
+
+dbtest('a slow agent does not block other agent successes and the weekly job limits concurrent requests',async()=>{
+  const source=baseline();source.predictions={};source.fixtures.updatedAt='2099-10-07T07:59:00Z';
+  source.fixtures.matches=[match,{...match,id:12},{...match,id:13}];await store.importSnapshot(source);
+  let release,active=0,maximum=0;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const providers=Object.fromEntries(['jev','openai','claude','chatgpt','gemini'].map(id=>[id,async()=>{
+    active++;maximum=Math.max(maximum,active);
+    if(id==='jev')await gate;
+    else await new Promise(resolve=>setTimeout(resolve,5));
+    active--;return {...prediction,model:id,generatedAt:'2099-10-07T08:00:00Z'};
+  }]));
+  const job=generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{});
+  try {
+    let completed=false;
+    for(let attempt=0;attempt<100;attempt++){
+      const live=(await response(fixturesHandler)).matches[0];
+      if(['openai','claude','chatgpt','gemini'].every(id=>live.predictions[id])){completed=true;break;}
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    assert.equal(completed,true);assert.ok(maximum<=6);assert.ok(maximum>1);
+  } finally {release();await job;}
+  const live=await response(fixturesHandler);
+  assert.ok(live.matches.every(fixture=>Object.keys(fixture.predictions).length===5));
 });
