@@ -1,6 +1,7 @@
 import {fixtureFreshness} from './fixture-freshness.mjs';
 import {forecastNotice} from './forecast-view.mjs';
 import {renderMatchCard} from './match-card.mjs';
+import {renderCompetitionStandings,renderHistoricalLeaderboard} from './leaderboard.mjs';
 const $=s=>document.querySelector(s);
 let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null;
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -32,27 +33,23 @@ function resultRow(r){
 function renderScoreboard(){
   if(!trackRecord)return;
   const shared=$('#scoreboard-scope').value==='shared';
-  const summaries=shared?trackRecord.sharedComparison?.providerSummaries:trackRecord.providerSummaries;
-  for(const provider of ['jev','openai']){
-    const summary=summaries?.[provider];
-    $(`#tr-${provider}-fixtures`).textContent=summary?.resolved ?? '—';
-    $(`#tr-${provider}-result`).textContent=summary?.resolved?`${Math.round(summary.outcomeAccuracy*100)}%`:'—';
-    $(`#tr-${provider}-scores`).textContent=summary?.resolved?`${Math.round(summary.scoreAccuracy*100)}%`:'—';
-    $(`#tr-${provider}-result-count`).textContent=summary?`${summary.outcomeCorrect} of ${summary.resolved}`:'';
-    $(`#tr-${provider}-score-count`).textContent=summary?`${summary.scoreCorrect} of ${summary.resolved}`:'';
-    $(`#tr-${provider}-brier`).textContent=Number.isFinite(summary?.brierScore)?summary.brierScore.toFixed(3):'—';
-    $(`#tr-${provider}-brier-count`).textContent=summary?`${summary.brierSampleCount} forecasts`:'';
-  }
-  $('#scoreboard-caption').hidden=!shared;
-  $('#scoreboard-caption').textContent=shared?`${trackRecord.sharedComparison?.resolved ?? 0} shared matches predicted by both providers`:'';
-  $('#track-notice').textContent=shared?'Only completed matches with eligible pre-match predictions from both providers.':'Each provider’s full record of completed matches with eligible pre-match predictions.';
+  const historical=renderHistoricalLeaderboard(trackRecord,shared?'shared':'full');
+  $('#scoreboard-caption').textContent=historical.caption;
+  $('#scoreboard-list').innerHTML=historical.rows;
+  $('#track-notice').textContent=shared
+    ? `Shared scope uses results with eligible forecasts from all agents. Its Brier samples use valid probabilities from every agent. Totals ignore Results pagination.${historical.hasSamples?'':' No scored history is available in this scope.'}`
+    : `Full history uses retained completed results across seasons. Accuracy counts submitted forecasts; O Score may include mean-assigned missing forecasts. Totals ignore Results pagination.${historical.hasSamples?'':' No scored history is available in this scope.'}`;
+  const competition=renderCompetitionStandings(trackRecord);
+  $('#competition-state').textContent=competition.message;
+  $('#competition-view').hidden=!competition.active;
+  $('#competition-list').innerHTML=competition.rows;
 }
 async function loadResults(page=1,append=false){
   try{
     const d=await request(`/api/results?page=${page}`);
     if(d.fixtureRefresh)renderFreshness(d.fixtureRefresh.updatedAt);
     resultsPage=d.page;resultsTotal=d.total;
-    trackRecord={providerSummaries:d.providerSummaries,sharedComparison:d.sharedComparison};
+    trackRecord=d;
     renderScoreboard();
     $('#track-notice').classList.remove('error');
     $('#results-notice').classList.remove('error');

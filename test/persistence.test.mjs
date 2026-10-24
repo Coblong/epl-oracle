@@ -364,7 +364,7 @@ dbtest('Results expose earned and mean-assigned O Scores without adding missing 
   assert.equal(result.forecasts.claude,undefined);
   assert.deepEqual(result.missingProviders,['claude','chatgpt','gemini']);
   assert.deepEqual(page.providerSummaries.claude.oScoreDiagnostics,
-    {scope:'full_history',earnedCount:0,meanAssignedCount:1,sampleCount:1,total:0.5,average:0.5});
+    {scope:'full_history',eligibleMatchCount:2,submittedCount:0,missingCount:2,earnedCount:0,meanAssignedCount:1,unavailableCount:1,sampleCount:1,total:0.5,average:0.5});
   const allMissing=page.results.find(row=>row.id===withoutForecast.id);
   assert.deepEqual(allMissing.actualScore,[0,0]);
   assert.deepEqual(allMissing.missingProviders,['jev','openai','claude','chatgpt','gemini']);
@@ -375,6 +375,9 @@ dbtest('Results expose earned and mean-assigned O Scores without adding missing 
   assert.deepEqual(api.competition,{active:false,startedAt:null,includedFixtureBoundary:null});
   assert.equal(api.scoringRules.id,'oracle-score-v1');
   assert.equal(api.results.find(row=>row.id===match.id).oScores.claude.source,'mean_assigned');
+  assert.equal(api.sharedComparison.oScoreDiagnostics.scope,'shared_all_agents');
+  assert.equal(api.sharedComparison.oScoreDiagnostics.resolved,0);
+  assert.equal(api.sharedComparison.oScoreDiagnostics.providerSummaries.jev.sampleCount,0);
 
   await store.refreshFixtures({matches:[],teams,source:source.fixtures.source,updatedAt:'2099-10-14T08:00:00Z',raw:[
     {id:match.id,event:2,kickoff_time:match.kickoff,team_h:1,team_a:2,team_h_score:4,team_a_score:1,finished:true},
@@ -386,9 +389,9 @@ dbtest('Results expose earned and mean-assigned O Scores without adding missing 
   assert.equal(correctedResult.oScores.openai.value,1);
   assert.equal(correctedResult.oScores.claude.value,1.5);
   assert.deepEqual(corrected.providerSummaries.jev.oScoreDiagnostics,
-    {scope:'full_history',earnedCount:1,meanAssignedCount:0,sampleCount:1,total:2,average:2});
+    {scope:'full_history',eligibleMatchCount:2,submittedCount:1,missingCount:1,earnedCount:1,meanAssignedCount:0,unavailableCount:1,sampleCount:1,total:2,average:2});
   assert.deepEqual(corrected.providerSummaries.claude.oScoreDiagnostics,
-    {scope:'full_history',earnedCount:0,meanAssignedCount:1,sampleCount:1,total:1.5,average:1.5});
+    {scope:'full_history',eligibleMatchCount:2,submittedCount:0,missingCount:2,earnedCount:0,meanAssignedCount:1,unavailableCount:1,sampleCount:1,total:1.5,average:1.5});
 });
 
 dbtest('daily refresh settles provisional final scores, retains both pre-kickoff forecasts, and leaves an unconfirmed 90-minute match unresolved',async()=>{
@@ -901,6 +904,10 @@ dbtest('all five agents survive the weekly job and appear in read APIs and compl
   }
   assert.equal(completed.sharedComparison.resolved,1);
   assert.deepEqual(completed.sharedComparison.providerIds,ids);
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.scope,'shared_all_agents');
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.resolved,1);
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.providerSummaries.jev.total,0);
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.providerSummaries.gemini.sampleCount,1);
 });
 
 dbtest('failed paid responses retain usage per attempt and retry without replacing successful agents or old forecasts',async()=>{
