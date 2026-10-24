@@ -30,6 +30,25 @@ test('active unfinished gameweeks show provisional standings but do not name a w
   assert.equal((view.rows.match(/<td>1<\/td>/g)||[]).length,3);
 });
 
+test('active rows follow scoped rank order and use scoped coverage counts',()=>{
+  const activeSummaries={
+    jev:{...competitionSummary(4),submittedCount:1,missingCount:2,earnedCount:1,meanAssignedCount:2,sampleCount:3},
+    openai:{...competitionSummary(1),submittedCount:3,missingCount:0,earnedCount:3,meanAssignedCount:0,sampleCount:3},
+    claude:{...competitionSummary(2),submittedCount:2,missingCount:1,earnedCount:2,meanAssignedCount:1,sampleCount:3},
+  };
+  const historicalSummaries=Object.fromEntries(agents.map(agent=>[agent.id,{total:0,average:0,submittedCount:99,
+    missingCount:98,earnedCount:97,meanAssignedCount:96,sampleCount:95}]));
+  const activeWeek={...week,oScoreSummaries:historicalSummaries,competitionSummaries:activeSummaries};
+  const view=renderGameweekView({agents,competition:{active:true,includedFixtureBoundary:42},gameweeks:[activeWeek]});
+
+  assert.ok(view.rows.indexOf('<th scope="row">Decisions API</th>')<view.rows.indexOf('<th scope="row">Claude</th>'));
+  assert.ok(view.rows.indexOf('<th scope="row">Claude</th>')<view.rows.indexOf('<th scope="row">Jev</th>'));
+  assert.match(view.rows,/3 submitted · 0 missing<\/small><small>3 earned · 0 mean-assigned · 3 scored/);
+  assert.match(view.rows,/2 submitted · 1 missing<\/small><small>2 earned · 1 mean-assigned · 3 scored/);
+  assert.match(view.rows,/1 submitted · 2 missing<\/small><small>1 earned · 2 mean-assigned · 3 scored/);
+  assert.doesNotMatch(view.rows,/99 submitted|98 missing|95 scored/);
+});
+
 test('settled active gameweeks name joint winners and current rounds are selected by default',()=>{
   const weeks=[{...week,gameweek:1,counts:{fixtures:1,completed:1,remaining:0,cancelled:0},complete:true,
       competitionSummaries:{jev:competitionSummary(1),openai:competitionSummary(1),claude:competitionSummary(2)}},

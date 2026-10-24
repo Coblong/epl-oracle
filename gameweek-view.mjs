@@ -16,16 +16,20 @@ export function renderGameweekView(data,selectedGameweek=null){
   const active=competition?.active===true&&competition.includedFixtureBoundary!=null&&Boolean(week?.competitionSummaries);
   const ranked=active?rankCompetitionCohort(week.competitionSummaries,agents):[];
   const byAgent=new Map(ranked.map(row=>[row.id,row]));
-  const rows=week?agents.map(agent=>{
+  const displayAgents=active
+    ? [...ranked.map(row=>agents.find(agent=>agent.id===row.id)).filter(Boolean),...agents.filter(agent=>!byAgent.has(agent.id))]
+    : agents;
+  const rows=week?displayAgents.map(agent=>{
     const summary=active?byAgent.get(agent.id):null;
     const historic=week.providerSummaries?.[agent.id]??{};
     const sharedBrier=week.sharedComparison?.providerSummaries?.[agent.id]??{};
     const oscore=week.oScoreSummaries?.[agent.id]??{};
+    const scoreDetails=active?summary:oscore;
     const accuracy=active?summary:historic;
     const rank=active?`<td>${summary?.rank??'—'}</td>`:'';
     const brier=active?accuracy?.brierScore:sharedBrier.brierScore;
     const brierSamples=active?accuracy?.brierSampleCount:sharedBrier.brierSampleCount;
-    return `<tr>${rank}<th scope="row">${escape(agent.name)}</th><td>${number(active?summary?.total:oscore.total)}<small>${oscore.submittedCount??0} submitted · ${oscore.missingCount??0} missing</small><small>${oscore.earnedCount??0} earned · ${oscore.meanAssignedCount??0} mean-assigned · ${oscore.sampleCount??0} scored</small></td><td>${number(active?summary?.average:oscore.average)}<small>per scored match</small></td><td>${percent(accuracy?.outcomeAccuracy,accuracy?.resolved??0)}<small>${accuracy?.outcomeCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${percent(accuracy?.scoreAccuracy,accuracy?.resolved??0)}<small>${accuracy?.scoreCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${Number.isFinite(brier)?brier.toFixed(3):'—'}<small>${brierSamples??0} shared probability samples</small></td></tr>`;
+    return `<tr>${rank}<th scope="row">${escape(agent.name)}</th><td>${number(active?summary?.total:oscore.total)}<small>${scoreDetails.submittedCount??0} submitted · ${scoreDetails.missingCount??0} missing</small><small>${scoreDetails.earnedCount??0} earned · ${scoreDetails.meanAssignedCount??0} mean-assigned · ${scoreDetails.sampleCount??0} scored</small></td><td>${number(active?summary?.average:oscore.average)}<small>per scored match</small></td><td>${percent(accuracy?.outcomeAccuracy,accuracy?.resolved??0)}<small>${accuracy?.outcomeCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${percent(accuracy?.scoreAccuracy,accuracy?.resolved??0)}<small>${accuracy?.scoreCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${Number.isFinite(brier)?brier.toFixed(3):'—'}<small>${brierSamples??0} shared probability samples</small></td></tr>`;
   }).join(''):`<tr><td colspan="6" class="leaderboard-empty">No current-season gameweek data is available.</td></tr>`;
   let message='No current-season gameweek data is available.';
   if(week){
