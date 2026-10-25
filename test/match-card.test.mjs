@@ -23,7 +23,7 @@ const match = {
 
 test('a match card lists each agent once in registry order and keeps forecast detail expandable',()=>{
   const html=renderMatchCard(match);
-  const names=['Jev','Decisions API','Claude','ChatGPT','Gemini'];
+  const names=['Jev','Decisions','Claude','ChatGPT','Gemini'];
   let prior=-1;
   for(const name of names){
     const index=html.indexOf(`>${name}<`);
@@ -41,6 +41,9 @@ test('a match card lists each agent once in registry order and keeps forecast de
   assert.match(html,/Refresh in progress/);
   assert.match(html,/Attempt 1 of 3/);
   assert.match(html,/Awaiting result/);
+  assert.doesNotMatch(html,/Decisions API/);
+  assert.match(html,/aria-label="Decisions forecast"/);
+  assert.match(html,/aria-label="Decisions: Draw, predicted score 1 : 1"/);
 });
 
 test('missing agents stay visible without an invented forecast',()=>{
