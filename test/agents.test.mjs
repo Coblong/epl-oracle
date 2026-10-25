@@ -12,22 +12,22 @@ test('Claude sends saved evidence once and retains the actual model, usage and r
     assert.equal(url,'https://api.anthropic.com/v1/messages');
     assert.equal(options.headers['x-api-key'],'test-only-key');
     const body=JSON.parse(options.body);
-    assert.equal(body.model,'claude-haiku-5-5');
+    assert.equal(body.model,'claude-opus-5-5');
     assert.deepEqual(JSON.parse(body.messages[0].content).evidence,predictionEvidence(match));
     assert.equal(body.max_tokens,4096);
     assert.equal(body.output_config.effort,'low');
     assert.equal(body.output_config.format.schema.properties.scoreProbabilities.required.length,49);
     assert.ok(Object.values(body.output_config.format.schema.properties.scoreProbabilities.properties)
       .every(property=>property.type==='number'&&!Object.hasOwn(property,'minimum')&&!Object.hasOwn(property,'maximum')));
-    return Response.json({model:'claude-haiku-5-5-20261001',stop_reason:'end_turn',
+    return Response.json({model:'claude-opus-5-5-20261001',stop_reason:'end_turn',
       content:[{type:'text',text:JSON.stringify({scoreProbabilities:distribution()})}],
       usage:{input_tokens:1000,output_tokens:200}});
   });
   const prediction=await predictClaude(match,{apiKey:'test-only-key'});
   assert.equal(prediction.outcome,'home');assert.deepEqual(prediction.score,[2,1]);
-  assert.equal(prediction.model,'claude-haiku-5-5-20261001');
+  assert.equal(prediction.model,'claude-opus-5-5-20261001');
   assert.equal(prediction.usage.inputTokens,1000);assert.equal(prediction.usage.outputTokens,200);
-  assert.equal(prediction.cost.amount,.0002);assert.equal(prediction.cost.estimated,true);
+  assert.equal(prediction.cost.amount,.008);assert.equal(prediction.cost.estimated,true);
   assert.equal(prediction.method,'score-distribution-result-first-v1');
 });
 
@@ -53,28 +53,28 @@ test('ChatGPT uses Responses with bounded low reasoning and retains billed outpu
 test('Gemini keeps its key out of URLs and counts thinking separately in the cost estimate',async t=>{
   const {predictGemini}=await import('../lib/gemini.mjs');
   t.mock.method(globalThis,'fetch',async(url,options)=>{
-    assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent');
+    assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent');
     assert.equal(options.headers['x-goog-api-key'],'test-only-key');
     const body=JSON.parse(options.body);
     assert.deepEqual(JSON.parse(body.contents[0].parts[0].text).evidence,predictionEvidence(match));
     assert.equal(body.generationConfig.maxOutputTokens,4096);
-    assert.deepEqual(body.generationConfig.thinkingConfig,{thinkingLevel:'MINIMAL'});
+    assert.deepEqual(body.generationConfig.thinkingConfig,{thinkingLevel:'LOW'});
     assert.equal(body.generationConfig.responseJsonSchema.properties.scoreProbabilities.required.length,49);
-    return Response.json({modelVersion:'gemini-3.1-flash-lite',candidates:[{finishReason:'STOP',content:{parts:[
+    return Response.json({modelVersion:'gemini-3.1-pro-preview',candidates:[{finishReason:'STOP',content:{parts:[
       {thought:true,text:'private reasoning'}, {text:JSON.stringify({scoreProbabilities:distribution()})}]}}],
       usageMetadata:{promptTokenCount:1000,candidatesTokenCount:200,thoughtsTokenCount:100}});
   });
   const prediction=await predictGemini(match,{apiKey:'test-only-key'});
   assert.equal(prediction.outcome,'home');assert.deepEqual(prediction.score,[2,1]);
-  assert.equal(prediction.model,'gemini-3.1-flash-lite');assert.equal(prediction.usage.reasoningTokens,100);
-  assert.equal(prediction.cost.amount,.0007);
+  assert.equal(prediction.model,'gemini-3.1-pro-preview');assert.equal(prediction.usage.reasoningTokens,100);
+  assert.equal(prediction.cost.amount,.0056);
   assert.ok(!JSON.stringify(prediction).includes('private reasoning'));
 });
 
 test('Gemini normalizes a complete bounded distribution and preserves its original total',async t=>{
   const {predictGemini}=await import('../lib/gemini.mjs');
   const probabilities=scoreDistribution({'1_1':.20,'2_1':.30,'1_0':.24,'0_1':.20,'0_0':.097});
-  t.mock.method(globalThis,'fetch',async()=>Response.json({modelVersion:'gemini-3.1-flash-lite',
+  t.mock.method(globalThis,'fetch',async()=>Response.json({modelVersion:'gemini-3.1-pro-preview',
     candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({scoreProbabilities:probabilities})}]}}],
     usageMetadata:{promptTokenCount:100, candidatesTokenCount:200}}));
   const prediction=await predictGemini(match,{apiKey:'test-only-key'});
@@ -85,9 +85,9 @@ test('Gemini normalizes a complete bounded distribution and preserves its origin
 });
 
 const successfulBodies={
-  claude:()=>({model:'claude-haiku-5-5',stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify({scoreProbabilities:distribution()})}],usage:{input_tokens:100,output_tokens:200}}),
+  claude:()=>({model:'claude-opus-5-5',stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify({scoreProbabilities:distribution()})}],usage:{input_tokens:100,output_tokens:200}}),
   chatgpt:()=>({model:'gpt-6.1-sol',status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({scoreProbabilities:distribution()})}]}],usage:{input_tokens:100,output_tokens:200}}),
-  gemini:()=>({modelVersion:'gemini-3.1-flash-lite',candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({scoreProbabilities:distribution()})}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:200}}),
+  gemini:()=>({modelVersion:'gemini-3.1-pro-preview',candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({scoreProbabilities:distribution()})}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:200}}),
 };
 const adapterFor=async provider=>provider==='claude'?predictClaude:provider==='chatgpt'?(await import('../lib/chatgpt.mjs')).predictChatGPT:(await import('../lib/gemini.mjs')).predictGemini;
 const replaceText=(provider,body,text)=>{
