@@ -58,7 +58,7 @@ Matches and all five agents’ forecasts remain on Predictions after kickoff unt
 
 ### Result-first forecasts
 
-For all five agents, validate exactly 49 score probabilities, each finite and between 0 and 1, with a total within 0.02 of 1. Normalize accepted distributions. Sum home-winning, drawn and away-winning scorelines to derive outcome probabilities. Choose the highest-probability result, then the highest-probability score within that result. The provider’s own global score choice does not override this selection.
+For all five agents, validate exactly 49 finite score probabilities between 0 and 1. Jev, Decisions, Claude and ChatGPT require a total within 0.02 of 1. Gemini accepts any nonzero total for a complete bounded distribution, normalizes it, and retains the original total for audit. Sum home-winning, drawn and away-winning scorelines to derive outcome probabilities. Choose the highest-probability result, then the highest-probability score within that result. The provider’s own global score choice does not override this selection.
 
 For example, 1:1 at 30%, 2:1 at 26%, 1:0 at 24% and 0:1 at 20% yield home win 50%, draw 30%, away win 20%. Display home win and 2:1, prioritizing the result even though 1:1 is the globally most likely exact score. The labels are Predicted result and Predicted score.
 

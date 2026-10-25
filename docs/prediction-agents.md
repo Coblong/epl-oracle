@@ -20,7 +20,7 @@ Missing credentials remain visible as failed or missing agent states. They do no
 
 ## Requests and limits
 
-All agents receive equivalent evidence from the immutable weekly fixture snapshot. Jev and Decisions receive the existing score choice question. Claude, ChatGPT and Gemini receive that same question and evidence, with a JSON schema for exactly 49 score probabilities. The application validates and normalizes the distribution, then chooses the highest aggregate-probability result and the most likely score within it. It retains the distribution for scoring and rejects refusals, incomplete responses, missing actual model identity and invalid probabilities.
+All agents receive equivalent evidence from the immutable weekly fixture snapshot. Jev and Decisions receive the existing score choice question. Claude, ChatGPT and Gemini receive that same question and evidence, with a JSON schema for exactly 49 score probabilities. Every agent must return exactly 49 finite values in `[0, 1]`. Jev, Decisions, Claude and ChatGPT require a total within `0.02` of one. Gemini accepts any nonzero total for a complete bounded distribution, normalizes it, and retains the original total for audit. The application then chooses the highest aggregate-probability result and the most likely score within it. It rejects refusals, incomplete responses, missing actual model identity and invalid probabilities.
 
 - Claude uses `POST /v1/messages`, adaptive thinking, `output_config.effort: low`, structured JSON output and `max_tokens: 4096`.
 - ChatGPT uses `POST /v1/responses`, `reasoning.effort: low`, strict structured JSON output, `max_output_tokens: 4096` and `store: false`.
