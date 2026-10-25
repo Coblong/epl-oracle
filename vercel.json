@@ -11,7 +11,8 @@
   ],
   "functions": {
     "api/cron/fixtures.mjs": {"maxDuration": 60},
-    "api/cron/predictions.mjs": {"maxDuration": 300}
+    "api/cron/predictions.mjs": {"maxDuration": 300},
+    "api/cron/predictions/manual.mjs": {"maxDuration": 300}
   },
   "headers": [
     {

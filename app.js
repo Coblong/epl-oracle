@@ -1,9 +1,11 @@
 import {fixtureFreshness} from './fixture-freshness.mjs';
 import {forecastNotice} from './forecast-view.mjs';
 import {renderMatchCard} from './match-card.mjs';
+import {renderCompetitionStandings,renderHistoricalLeaderboard} from './leaderboard.mjs';
+import {renderGameweekView} from './gameweek-view.mjs';
+import {renderResultCard,resultsCompetitionNotice} from './result-card.mjs';
 const $=s=>document.querySelector(s);
-let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null;
-const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let matches=[], limit=30, resultsPage=0,resultsTotal=0,trackRecord=null,selectedGameweek=null;
 const fmt=(date,options)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',...options}).format(new Date(date));
 const dateKey=m=>m.kickoff?fmt(m.kickoff,{year:'numeric',month:'2-digit',day:'2-digit'}):'TBC';
 function filtered(){const q=$('#search').value.trim().toLowerCase(),gw=$('#gameweek').value;return matches.filter(m=>(gw==='all'||String(m.gameweek)===gw)&&(!q||`${m.home.name} ${m.away.name}`.toLowerCase().includes(q)));}
@@ -15,57 +17,63 @@ function notice(text,error=false){$('#notice').textContent=text;$('#notice').cla
 async function request(url){const r=await fetch(url);const data=await r.json();if(!r.ok)throw new Error(data.error||'Request failed. Please retry.');return data;}
 function renderFreshness(updatedAt){const status=fixtureFreshness(updatedAt);const el=$('#fixture-freshness');el.hidden=!status.stale;el.textContent=status.message;}
 async function load(){$('#refresh').disabled=true;notice('Fetching official Premier League fixtures…');try{const d=await request('/api/fixtures');matches=d.matches;renderFreshness(d.updatedAt);const previous=$('#gameweek').value;$('#gameweek').innerHTML='<option value="all">All gameweeks</option>'+[...new Set(matches.map(m=>m.gameweek).filter(x=>x!=null))].sort((a,b)=>a-b).map(g=>`<option value="${g}">Gameweek ${g}</option>`).join('');$('#gameweek').value=[...$('#gameweek').options].some(x=>x.value===previous)?previous:'all';$('#fixture-count').textContent=matches.length;$('#updated').textContent=`Updated ${fmt(d.updatedAt,{hour:'2-digit',minute:'2-digit'})} · ${fmt(d.updatedAt,{day:'numeric',month:'short'})}`;render();const message=forecastNotice(d.providersConfigured??{jev:d.configured,openai:false});notice(message.text,message.error);}catch(e){notice(e.message,true);if(!matches.length)$('#matches').innerHTML='<div class="empty">Fixtures are unavailable right now. Use Refresh to try again.</div>';}finally{$('#refresh').disabled=false;}}
-function resultRow(r){
-  const forecasts=['jev','openai'].map(provider=>{
-    const entry=r.forecasts?.[provider];
-    if(!entry)return '<td class="missing-forecast">No pre-match forecast</td>';
-    const p=entry.prediction,picked=p.outcome==='draw'?'Draw':p.outcome==='home'?'Home win':'Away win';
-    const outcomeLabel=`${picked}, ${entry.correctOutcome?'correct':'incorrect'} result prediction`;
-    const scoreLabel=`${p.score.join(':')}, ${entry.correctScore?'correct':'incorrect'} exact score prediction`;
-    return `<td class="result-prediction"><span class="badge ${entry.correctOutcome?'badge-correct':'badge-wrong'}" aria-label="${escape(outcomeLabel)}" title="${escape(outcomeLabel)}">${picked} ${entry.correctOutcome?'✓':'✗'}</span> <span class="badge ${entry.correctScore?'badge-correct':'badge-wrong'}" aria-label="${escape(scoreLabel)}" title="${escape(scoreLabel)}">${p.score.join(':')} ${entry.correctScore?'✓':'✗'}</span></td>`;
-  }).join('');
-  const actual=r.status==='cancelled'?'Cancelled':r.actualScore.join(' : ');
-  const date=r.kickoff?fmt(r.kickoff,{day:'numeric',month:'short',year:'numeric'}):'TBC';
-  const kickoff=r.kickoff?fmt(r.kickoff,{hour:'2-digit',minute:'2-digit'}):'TBC';
-  return `<tr><td>${date}</td><td>${kickoff}</td><th scope="row">${escape(r.home.name)} vs ${escape(r.away.name)}</th><td class="result-actual">${actual}</td>${forecasts}</tr>`;
-}
 function renderScoreboard(){
   if(!trackRecord)return;
   const shared=$('#scoreboard-scope').value==='shared';
-  const summaries=shared?trackRecord.sharedComparison?.providerSummaries:trackRecord.providerSummaries;
-  for(const provider of ['jev','openai']){
-    const summary=summaries?.[provider];
-    $(`#tr-${provider}-fixtures`).textContent=summary?.resolved ?? '—';
-    $(`#tr-${provider}-result`).textContent=summary?.resolved?`${Math.round(summary.outcomeAccuracy*100)}%`:'—';
-    $(`#tr-${provider}-scores`).textContent=summary?.resolved?`${Math.round(summary.scoreAccuracy*100)}%`:'—';
-    $(`#tr-${provider}-result-count`).textContent=summary?`${summary.outcomeCorrect} of ${summary.resolved}`:'';
-    $(`#tr-${provider}-score-count`).textContent=summary?`${summary.scoreCorrect} of ${summary.resolved}`:'';
-    $(`#tr-${provider}-brier`).textContent=Number.isFinite(summary?.brierScore)?summary.brierScore.toFixed(3):'—';
-    $(`#tr-${provider}-brier-count`).textContent=summary?`${summary.brierSampleCount} forecasts`:'';
-  }
-  $('#scoreboard-caption').hidden=!shared;
-  $('#scoreboard-caption').textContent=shared?`${trackRecord.sharedComparison?.resolved ?? 0} shared matches predicted by both providers`:'';
-  $('#track-notice').textContent=shared?'Only completed matches with eligible pre-match predictions from both providers.':'Each provider’s full record of completed matches with eligible pre-match predictions.';
+  const historical=renderHistoricalLeaderboard(trackRecord,shared?'shared':'full');
+  $('#scoreboard-caption').textContent=historical.caption;
+  $('#scoreboard-list').innerHTML=historical.rows;
+  $('#track-notice').textContent=shared
+    ? `Shared scope uses results with eligible forecasts from all agents. Its Brier samples use valid probabilities from every agent. Totals ignore Results pagination.${historical.hasSamples?'':' No scored history is available in this scope.'}`
+    : `Full history uses retained completed results across seasons. Accuracy counts submitted forecasts; O Score may include mean-assigned missing forecasts. Totals ignore Results pagination.${historical.hasSamples?'':' No scored history is available in this scope.'}`;
+  const competition=renderCompetitionStandings(trackRecord);
+  $('#competition-state').textContent=competition.message;
+  const activation=trackRecord.competition?.startedAt;
+  const boundaryText=activation
+    ? `Only matches kicking off on or after ${fmt(activation,{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})} London time count toward competition standings. Earlier results remain historical.`
+    : 'Competition standings and winners remain disabled until activation.';
+  $('#competition-help').textContent=boundaryText;
+  $('#gameweek-competition-help').textContent=boundaryText;
+  $('#competition-view').hidden=!competition.active;
+  $('#competition-list').innerHTML=competition.rows;
+  renderGameweek();
+}
+function renderGameweek(){
+  if(!trackRecord)return;
+  const view=renderGameweekView(trackRecord,selectedGameweek);
+  selectedGameweek=view.selectedGameweek;
+  const select=$('#gameweek-score-scope');
+  select.innerHTML=view.options||'<option value="">No gameweeks available</option>';
+  select.value=selectedGameweek===null?'':String(selectedGameweek);
+  $('#gameweek-score-head').innerHTML=view.headers;
+  $('#gameweek-score-list').innerHTML=view.rows;
+  $('#gameweek-score-notice').textContent=view.message;
 }
 async function loadResults(page=1,append=false){
   try{
     const d=await request(`/api/results?page=${page}`);
     if(d.fixtureRefresh)renderFreshness(d.fixtureRefresh.updatedAt);
     resultsPage=d.page;resultsTotal=d.total;
-    trackRecord={providerSummaries:d.providerSummaries,sharedComparison:d.sharedComparison};
+    trackRecord=d;
     renderScoreboard();
+    $('#results-competition-notice').textContent=resultsCompetitionNotice(d.competition);
     $('#track-notice').classList.remove('error');
     $('#results-notice').classList.remove('error');
+    $('#gameweek-score-notice').classList.remove('error');
+    $('#competition-state').classList.remove('error');
+    $('#results-retry').hidden=true;
     if(!append)$('#results-list').innerHTML='';
-    if(d.results.length)$('#results-list').insertAdjacentHTML('beforeend',d.results.map(resultRow).join(''));
-    else if(!append)$('#results-list').innerHTML='<tr><td colspan="6" class="empty">No fixtures have finished yet this season.</td></tr>';
+    if(d.results.length)$('#results-list').insertAdjacentHTML('beforeend',d.results.map(result=>renderResultCard(result)).join(''));
+    else if(!append)$('#results-list').innerHTML='<div class="empty">No fixtures have finished yet this season.</div>';
     $('#results-notice').textContent=resultsTotal?`Showing ${Math.min(resultsTotal,resultsPage*d.pageSize)} of ${resultsTotal} fixtures.`:'No completed fixtures.';
     $('#results-load-more').hidden=!d.hasMore;
-  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');}
+  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');$('#competition-state').textContent='Competition status unavailable. Retry loading results.';$('#competition-state').classList.add('error');$('#results-retry').hidden=false;}
 }
 function showView(view){$('#upcoming-view').hidden=view!=='upcoming';$('#results-view').hidden=view!=='results';$('#view-upcoming').setAttribute('aria-pressed',String(view==='upcoming'));$('#view-results').setAttribute('aria-pressed',String(view==='results'));$('#fixture-title').firstChild.textContent=view==='upcoming'?'Predictions':'Results';$('#shown-count').hidden=view!=='upcoming';}
 $('#view-upcoming').addEventListener('click',()=>showView('upcoming'));$('#view-results').addEventListener('click',()=>showView('results'));
 $('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').addEventListener('input',()=>{limit=30;render();});$('#load-more').addEventListener('click',()=>{limit+=30;render();});$('#refresh').addEventListener('click',()=>load());
 $('#scoreboard-scope').addEventListener('change',renderScoreboard);
+$('#gameweek-score-scope').addEventListener('change',event=>{selectedGameweek=Number(event.target.value)||null;renderGameweek();});
 $('#results-load-more').addEventListener('click',()=>loadResults(resultsPage+1,true));
+$('#results-retry').addEventListener('click',()=>loadResults());
 load();loadResults();
