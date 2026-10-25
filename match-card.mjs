@@ -18,6 +18,7 @@ function fixtureStatus(match){
 }
 
 function agentRow(match,agent,forecast,state={}){
+  const displayName=agent.id==='openai'?'Decisions':agent.name;
   const availability=state.availability??(forecast?'fresh':'missing');
   const statuses={failed:'Refresh failed.',exhausted:'Retries exhausted.',expired:'Retry window expired.',started:'Refresh in progress.',pending:'Waiting for a scheduled retry.'};
   const status=statuses[state.status]??'';
@@ -34,7 +35,7 @@ function agentRow(match,agent,forecast,state={}){
   const retries=status?`${status}${retained?' Earlier forecast retained.':''}${count}${state.status==='failed'?' Waiting for a scheduled retry.':''}`:`No retry pending.${count}`;
   const details=forecast?`<details class="agent-details"><summary>Details</summary>${probabilityText}<p>Model: ${escape(forecast.model??'Unavailable')}</p><p>Generated: ${time}</p><p>${freshness}</p><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</details>`:`<details class="agent-details"><summary>Details</summary><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</details>`;
   const scoreLabel=forecast?`${result}, predicted score ${score}`:'No prediction';
-  return `<section class="agent-row" aria-label="${escape(agent.name)} forecast"><div class="agent-identity"><strong>${escape(agent.name)}</strong><span class="forecast-state ${availability}">${label}</span></div><div class="agent-score" aria-label="${escape(agent.name)}: ${escape(scoreLabel)}">${forecast?`<span>${escape(result)}</span><strong>${escape(score)}</strong>`:'<span class="no-forecast">—</span>'}</div>${details}</section>`;
+  return `<section class="agent-row" aria-label="${escape(displayName)} forecast"><div class="agent-identity"><strong>${escape(displayName)}</strong><span class="forecast-state ${availability}">${label}</span></div><div class="agent-score" aria-label="${escape(displayName)}: ${escape(scoreLabel)}">${forecast?`<span>${escape(result)}</span><strong>${escape(score)}</strong>`:'<span class="no-forecast">—</span>'}</div>${details}</section>`;
 }
 
 export function renderMatchCard(match){
