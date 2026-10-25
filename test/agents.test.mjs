@@ -58,7 +58,7 @@ test('Gemini keeps its key out of URLs and counts thinking separately in the cos
     const body=JSON.parse(options.body);
     assert.deepEqual(JSON.parse(body.contents[0].parts[0].text).evidence,predictionEvidence(match));
     assert.equal(body.generationConfig.maxOutputTokens,4096);
-    assert.deepEqual(body.generationConfig.thinkingConfig,{thinkingLevel:'MINIMAL'});
+    assert.deepEqual(body.generationConfig.thinkingConfig,{thinkingLevel:'LOW'});
     assert.equal(body.generationConfig.responseJsonSchema.properties.scoreProbabilities.required.length,49);
     return Response.json({modelVersion:'gemini-3.1-pro-preview',candidates:[{finishReason:'STOP',content:{parts:[
       {thought:true,text:'private reasoning'}, {text:JSON.stringify({scoreProbabilities:distribution()})}]}}],
