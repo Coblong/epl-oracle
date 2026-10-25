@@ -1074,6 +1074,28 @@ dbtest('five-provider evidence flows through corrected results and O Score views
   assert.deepEqual(activeWeek.competitionCounts,{fixtures:3,completed:2,remaining:1,cancelled:0});
   assert.equal(activeWeek.competitionSummaries.jev.resolved,1);
   assert.equal(activeWeek.competitionSummaries.jev.brierSampleCount,0);
+
+  // A postponed fixture can temporarily lose its kickoff and event. Preserve
+  // it as a potentially eligible member so finished fixtures do not settle
+  // the active gameweek or announce a winner prematurely.
+  await store.refreshFixtures({matches:[{...future,kickoff:null,gameweek:null}],teams,source:'test',
+    updatedAt:'2099-10-15T15:00:00Z',raw:[...correctedRaw,{...futureRaw,event:null,kickoff_time:null}]});
+  assert.equal((await store.getFixtures()).matches.find(fixture=>fixture.id===104).kickoff,null);
+  const postponed=await response(resultsHandler);
+  const postponedWeek=postponed.gameweeks.find(week=>week.gameweek===7);
+  assert.deepEqual(postponedWeek.competitionCounts,{fixtures:3,completed:2,remaining:1,cancelled:0});
+  assert.equal(postponedWeek.competitionComplete,false);
+  assert.equal(postponedWeek.competitionSummaries.jev.resolved,1);
+  assert.match(renderGameweekView(postponed).message,/provisional/i);
+  assert.doesNotMatch(renderGameweekView(postponed).message,/winner/i);
+
+  const rescheduledAndCompleted={...futureRaw,event:7,kickoff_time:'2099-10-16T12:00:00Z',
+    finished:true,team_h_score:2,team_a_score:0};
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-16T13:00:00Z',raw:[...correctedRaw,rescheduledAndCompleted]});
+  const settled=await response(resultsHandler);
+  const settledWeek=settled.gameweeks.find(week=>week.gameweek===7);
+  assert.deepEqual(settledWeek.competitionCounts,{fixtures:3,completed:3,remaining:0,cancelled:0});
+  assert.equal(settledWeek.competitionComplete,true);
 });
 
 dbtest('fixture availability treats the current activation run as fresh',async()=>{
