@@ -17,6 +17,8 @@ test('Claude sends saved evidence once and retains the actual model, usage and r
     assert.equal(body.max_tokens,4096);
     assert.equal(body.output_config.effort,'low');
     assert.equal(body.output_config.format.schema.properties.scoreProbabilities.required.length,49);
+    assert.ok(Object.values(body.output_config.format.schema.properties.scoreProbabilities.properties)
+      .every(property=>property.type==='number'&&!Object.hasOwn(property,'minimum')&&!Object.hasOwn(property,'maximum')));
     return Response.json({model:'claude-haiku-5-5-20261001',stop_reason:'end_turn',
       content:[{type:'text',text:JSON.stringify({scoreProbabilities:distribution()})}],
       usage:{input_tokens:1000,output_tokens:200}});
@@ -69,6 +71,19 @@ test('Gemini keeps its key out of URLs and counts thinking separately in the cos
   assert.ok(!JSON.stringify(prediction).includes('private reasoning'));
 });
 
+test('Gemini normalizes a complete bounded distribution and preserves its original total',async t=>{
+  const {predictGemini}=await import('../lib/gemini.mjs');
+  const probabilities=scoreDistribution({'1_1':.20,'2_1':.30,'1_0':.24,'0_1':.20,'0_0':.097});
+  t.mock.method(globalThis,'fetch',async()=>Response.json({modelVersion:'gemini-3.1-flash-lite',
+    candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({scoreProbabilities:probabilities})}]}}],
+    usageMetadata:{promptTokenCount:100, candidatesTokenCount:200}}));
+  const prediction=await predictGemini(match,{apiKey:'test-only-key'});
+  assert.equal(prediction.outcome,'home');assert.deepEqual(prediction.score,[2,1]);
+  assert.ok(Math.abs(prediction.scoreProbabilityTotal-1.037)<1e-12);
+  assert.equal(Object.keys(prediction.scoreProbabilities).length,49);
+  assert.ok(Math.abs(Object.values(prediction.scoreProbabilities).reduce((sum,value)=>sum+value,0)-1)<1e-12);
+});
+
 const successfulBodies={
   claude:()=>({model:'claude-haiku-5-5',stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify({scoreProbabilities:distribution()})}],usage:{input_tokens:100,output_tokens:200}}),
   chatgpt:()=>({model:'gpt-6.1-sol',status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({scoreProbabilities:distribution()})}]}],usage:{input_tokens:100,output_tokens:200}}),
@@ -87,8 +102,10 @@ for(const provider of ['claude','chatgpt','gemini']) {
     let body;
     t.mock.method(globalThis,'fetch',async()=>Response.json(body));
     const invalid=[null,{}, {scoreProbabilities:{'1_0':1}}, {scoreProbabilities:{...distribution(),'7_0':0}},
-      {scoreProbabilities:{...distribution(),'2_1':-1}}, {scoreProbabilities:scoreDistribution({'1_0':.5})},
+      {scoreProbabilities:{...distribution(),'2_1':-1}}, {scoreProbabilities:{...distribution(),'2_1':1.01}},
+      {scoreProbabilities:scoreDistribution({'1_0':0})},
       {scoreProbabilities:distribution(),explanation:'extra'}];
+    if(provider!=='gemini') invalid.push({scoreProbabilities:scoreDistribution({'1_0':.5})});
     for(const value of invalid){
       body=successfulBodies[provider]();replaceText(provider,body,JSON.stringify(value));
       await assert.rejects(predict(match,{apiKey:'test-only-key'}),error=>error.predictionMetadata.usage.inputTokens===100);
