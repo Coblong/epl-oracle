@@ -17,6 +17,8 @@ test('Claude sends saved evidence once and retains the actual model, usage and r
     assert.equal(body.max_tokens,4096);
     assert.equal(body.output_config.effort,'low');
     assert.equal(body.output_config.format.schema.properties.scoreProbabilities.required.length,49);
+    assert.ok(Object.values(body.output_config.format.schema.properties.scoreProbabilities.properties)
+      .every(property=>property.type==='number'&&!Object.hasOwn(property,'minimum')&&!Object.hasOwn(property,'maximum')));
     return Response.json({model:'claude-haiku-5-5-20261001',stop_reason:'end_turn',
       content:[{type:'text',text:JSON.stringify({scoreProbabilities:distribution()})}],
       usage:{input_tokens:1000,output_tokens:200}});
@@ -87,7 +89,8 @@ for(const provider of ['claude','chatgpt','gemini']) {
     let body;
     t.mock.method(globalThis,'fetch',async()=>Response.json(body));
     const invalid=[null,{}, {scoreProbabilities:{'1_0':1}}, {scoreProbabilities:{...distribution(),'7_0':0}},
-      {scoreProbabilities:{...distribution(),'2_1':-1}}, {scoreProbabilities:scoreDistribution({'1_0':.5})},
+      {scoreProbabilities:{...distribution(),'2_1':-1}}, {scoreProbabilities:{...distribution(),'2_1':1.01}},
+      {scoreProbabilities:scoreDistribution({'1_0':.5})},
       {scoreProbabilities:distribution(),explanation:'extra'}];
     for(const value of invalid){
       body=successfulBodies[provider]();replaceText(provider,body,JSON.stringify(value));
