@@ -69,8 +69,22 @@ async function loadResults(page=1,append=false){
     $('#results-load-more').hidden=!d.hasMore;
   }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');$('#competition-state').textContent='Competition status unavailable. Retry loading results.';$('#competition-state').classList.add('error');$('#results-retry').hidden=false;}
 }
-function showView(view){$('#upcoming-view').hidden=view!=='upcoming';$('#results-view').hidden=view!=='results';$('#view-upcoming').setAttribute('aria-pressed',String(view==='upcoming'));$('#view-results').setAttribute('aria-pressed',String(view==='results'));$('#fixture-title').firstChild.textContent=view==='upcoming'?'Predictions':'Results';$('#shown-count').hidden=view!=='upcoming';}
-$('#view-upcoming').addEventListener('click',()=>showView('upcoming'));$('#view-results').addEventListener('click',()=>showView('results'));
+const pages=new Set(['predictions','leaderboard','standings','stats','results']);
+function renderPage(){
+  const requested=location.hash.slice(1);
+  const page=pages.has(requested)?requested:'predictions';
+  document.querySelectorAll('[data-page]').forEach(section=>{section.hidden=section.dataset.page!==page;});
+  document.querySelectorAll('[data-page-link]').forEach(link=>{
+    if(link.dataset.pageLink===page)link.setAttribute('aria-current','page');
+    else link.removeAttribute('aria-current');
+  });
+  const homeLink=$('[data-home-link]');
+  if(page==='predictions')homeLink.setAttribute('aria-current','page');
+  else homeLink.removeAttribute('aria-current');
+  document.title=`${page==='predictions'?'Predictions':page[0].toUpperCase()+page.slice(1)} — The EPL Oracle`;
+}
+window.addEventListener('hashchange',renderPage);
+renderPage();
 $('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').addEventListener('input',()=>{limit=30;render();});$('#load-more').addEventListener('click',()=>{limit+=30;render();});$('#refresh').addEventListener('click',()=>load());
 $('#scoreboard-scope').addEventListener('change',renderScoreboard);
 $('#gameweek-score-scope').addEventListener('change',event=>{selectedGameweek=Number(event.target.value)||null;renderGameweek();});
