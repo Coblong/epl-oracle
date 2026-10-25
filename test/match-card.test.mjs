@@ -21,7 +21,7 @@ const match = {
   },
 };
 
-test('a match card lists each agent once in registry order and keeps forecast detail expandable',()=>{
+test('a match card lists each agent once and puts probabilities on the accessible forecast disclosure',()=>{
   const html=renderMatchCard(match);
   const names=['Jev','Decisions','Claude','ChatGPT','Gemini'];
   let prior=-1;
@@ -31,7 +31,11 @@ test('a match card lists each agent once in registry order and keeps forecast de
     prior=index;
   }
   assert.equal((html.match(/class="agent-row"/g)||[]).length,5);
-  assert.match(html,/<details/);
+  assert.equal((html.match(/class="agent-probability-row/g)||[]).length,5);
+  assert.match(html,/aria-label="Jev prediction probabilities: ARS 60%, Draw 25%, CHE 15%"/);
+  assert.match(html,/data-weight="0\.6"/);
+  assert.match(html,/class="agent-result">Arsenal win<\/span><strong>2 : 1<\/strong>/);
+  assert.doesNotMatch(html,/<summary>Details<\/summary>/);
   assert.match(html,/aria-label="Jev: Arsenal win, predicted score 2 : 1"/);
   assert.match(html,/gpt-6-luna/);
   assert.match(html,/2026-10-23T09:01:00Z/);
