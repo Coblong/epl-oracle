@@ -1135,27 +1135,27 @@ test('activation and manual prediction routes require an explicit secret and rej
 dbtest('failed paid responses retain usage per attempt and retry without replacing successful agents or old forecasts',async()=>{
   const source=baseline();source.fixtures.updatedAt='2099-10-07T07:59:00Z';await store.importSnapshot(source);
   let claudeCalls=0,geminiCalls=0;
-  const metadata={model:'claude-haiku-5-5',usage:{inputTokens:100,outputTokens:200},cost:{amount:.00011,currency:'USD',estimated:true}};
+  const metadata={model:'claude-opus-5-5',usage:{inputTokens:100,outputTokens:200},cost:{amount:.0044,currency:'USD',estimated:true}};
   const inputs=[];
   const providers={claude:async input=>{
     inputs.push(structuredClone(input));
     if(++claudeCalls===1)throw Object.assign(new Error('Private refusal text'),{predictionMetadata:metadata});
     return {...prediction,...metadata,generatedAt:'2099-10-07T08:15:00Z'};
-  },gemini:async()=>{geminiCalls++;return {...prediction,model:'gemini-3.1-flash-lite',generatedAt:'2099-10-07T08:00:00Z'};}};
+  },gemini:async()=>{geminiCalls++;return {...prediction,model:'gemini-3.1-pro-preview',generatedAt:'2099-10-07T08:00:00Z'};}};
   assert.deepEqual(await generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{}),{targeted:1,updated:1,failed:1});
   let live=(await response(fixturesHandler)).matches[0];
   assert.equal(live.forecastStates.claude.status,'failed');assert.equal(live.predictions.claude,undefined);
   assert.equal(live.predictions.jev.generatedAt,prediction.generatedAt);
   const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z');
   let state=await store.getRun(run.id);
-  assert.equal(state.attemptHistory.find(attempt=>attempt.provider==='claude').metadata.cost.amount,.00011);
+  assert.equal(state.attemptHistory.find(attempt=>attempt.provider==='claude').metadata.cost.amount,.0044);
   assert.equal((await generateWeeklyPredictions(store,providers,'2099-10-07T08:14:59Z',async()=>{})).updated,0);
   assert.deepEqual(await generateWeeklyPredictions(store,providers,'2099-10-07T08:15:00Z',async()=>{}),{targeted:1,updated:1,failed:0});
   assert.equal(claudeCalls,2);assert.equal(geminiCalls,1);assert.deepEqual(inputs,[match,match]);
   state=await store.getRun(run.id);
   const history=state.attemptHistory.filter(attempt=>attempt.provider==='claude');
   assert.deepEqual(history.map(attempt=>[attempt.attemptNumber,attempt.status]),[[1,'failed'],[2,'succeeded']]);
-  assert.ok(history.every(attempt=>attempt.metadata.model==='claude-haiku-5-5'));
+  assert.ok(history.every(attempt=>attempt.metadata.model==='claude-opus-5-5'));
   assert.equal(state.predictions.find(entry=>entry.provider==='claude').data.usage.inputTokens,100);
   assert.ok(!JSON.stringify(state).includes('Private refusal text'));
 });
@@ -1181,7 +1181,7 @@ dbtest('the production cron wires all five HTTP adapters to identical evidence a
       }
       if(url.endsWith('/messages')) {
         evidence.push(JSON.parse(body.messages[0].content).evidence);claudeCalls++;
-        return Response.json({model:'claude-haiku-5-5',stop_reason:'end_turn',content:[{type:'text',text:claudeCalls===1?'{}':text}],usage:{input_tokens:100,output_tokens:200}});
+        return Response.json({model:'claude-opus-5-5',stop_reason:'end_turn',content:[{type:'text',text:claudeCalls===1?'{}':text}],usage:{input_tokens:100,output_tokens:200}});
       }
       if(url.endsWith('/responses')) {
         evidence.push(JSON.parse(body.input).evidence);
@@ -1189,7 +1189,7 @@ dbtest('the production cron wires all five HTTP adapters to identical evidence a
       }
       assert.ok(url.endsWith(':generateContent'));
       evidence.push(JSON.parse(body.contents[0].parts[0].text).evidence);
-      return Response.json({modelVersion:'gemini-3.1-flash-lite',candidates:[{finishReason:'STOP',content:{parts:[{text}]}}]});
+      return Response.json({modelVersion:'gemini-3.1-pro-preview',candidates:[{finishReason:'STOP',content:{parts:[{text}]}}]});
     });
     const first=await response(predictionsHandler);
     assert.equal(first.updated,4);assert.equal(first.failed,1);
@@ -1205,7 +1205,7 @@ dbtest('the production cron wires all five HTTP adapters to identical evidence a
     assert.equal(retry.updated,1);assert.equal(retry.failed,0);assert.equal(evidence.length,6);
     assert.deepEqual(evidence[5],evidence[0]);
     const final=await response(fixturesHandler);
-    assert.equal(final.matches[0].predictions.claude.model,'claude-haiku-5-5');
+    assert.equal(final.matches[0].predictions.claude.model,'claude-opus-5-5');
     assert.ok(!JSON.stringify(final).includes('test-only-key'));
   } finally {
     t.mock.timers.reset();

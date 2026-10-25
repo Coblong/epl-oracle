@@ -8,9 +8,9 @@ Issue [#23](https://github.com/Coblong/epl-oracle/issues/23) expands the schedul
 | --- | --- | --- | --- |
 | `jev` | Jev | `typesafe-ai/jev` | `AI_GATEWAY_API_KEY` |
 | `openai` | Decisions API | `gpt-6-luna` | `OPENAI_API_KEY` |
-| `claude` | Claude | `claude-haiku-5-5` | `ANTHROPIC_API_KEY` |
+| `claude` | Claude | `claude-opus-5-5` | `ANTHROPIC_API_KEY` |
 | `chatgpt` | ChatGPT | `gpt-6.1-sol` | `OPENAI_API_KEY` |
-| `gemini` | Gemini | `gemini-3.1-flash-lite` | `GEMINI_API_KEY` |
+| `gemini` | Gemini | `gemini-3.1-pro-preview` | `GEMINI_API_KEY` |
 
 Set these server-only environment variables in the intended Vercel environment, or in an ignored `.env.local` for local development. Keep `PERSISTENCE_BACKEND=neon`, `DATABASE_URL` and an explicit `DATABASE_SCHEMA` configured as described in [Neon setup](neon-migration.md). Use an isolated schema for previews and local work. Neither API responses nor the public agent registry contain credential values.
 
@@ -24,7 +24,7 @@ All agents receive equivalent evidence from the immutable weekly fixture snapsho
 
 - Claude uses `POST /v1/messages`, adaptive thinking, `output_config.effort: low`, structured JSON output and `max_tokens: 4096`.
 - ChatGPT uses `POST /v1/responses`, `reasoning.effort: low`, strict structured JSON output, `max_output_tokens: 4096` and `store: false`.
-- Gemini uses `models/gemini-3.1-flash-lite:generateContent`, one candidate, structured JSON output, `thinkingLevel: MINIMAL` and `maxOutputTokens: 4096`.
+- Gemini uses `models/gemini-3.1-pro-preview:generateContent`, one candidate, structured JSON output, `thinkingLevel: MINIMAL` and `maxOutputTokens: 4096`.
 - Jev and Decisions retain the existing single fixed-choice evaluation request. They do not request free-form reasoning.
 
 The limits bound generated tokens, including reasoning where the provider includes it in the output budget. A response that hits a limit fails the attempt; limits are not increased automatically. There are no adapter-level HTTP retries. Each provider request has a 30-second timeout.
@@ -43,18 +43,19 @@ The default shared comparison requires eligible pre-kickoff forecasts from all f
 
 ## Usage and price estimates
 
-Rates were checked against official documentation on 23 October 2026. Amounts are USD estimates for the standard direct API tier, marked `estimated: true` and dated with `ratesAsOf`. They are not billing records or claims about an account's free tier, negotiated prices or discounts.
+Rates were checked against official documentation on 25 October 2026. Amounts are USD estimates for the standard direct API tier, marked `estimated: true` and dated with `ratesAsOf`. They are not billing records or claims about an account's free tier, negotiated prices or discounts.
 
 | Agent | Input per million tokens | Cached input | Output, including billed reasoning |
 | --- | --- | --- | --- |
 | Decisions API | $0.10 | $0.01 | $0 |
-| Claude | $0.10 | $0.01 | $0.50 |
+| Claude Opus 5.5 | $4.00 | $0.20 | $20.00 |
 | ChatGPT | $2.00 | $0.10 | $10.00 |
-| Gemini | $0.25 | $0.025 | $1.50 |
+| Gemini 3.1 Pro Preview (prompts ≤200k) | $2.00 | $0.20 | $12.00 |
+| Gemini 3.1 Pro Preview (prompts >200k) | $4.00 | $0.40 | $18.00 |
 
-Claude's rates above apply to prompts up to 100,000 tokens; the documented fivefold long-prompt rate applies above that. OpenAI estimates are limited to prompts up to 100,000 tokens. Requests with cache writes, unknown models or unavailable input/output usage have no cost estimate. Jev usage is retained when returned, but its cost remains unknown. Cache-write token counts are retained even when the cost is unknown. Gemini thinking tokens are added to candidate tokens for the output estimate; OpenAI and Claude already include billed reasoning in output usage.
+Claude Opus 5.5 uses standard rates across its 1M-token context window; its cache reads cost $0.20 per million tokens, and cache writes cost $5.00 (5-minute) or $8.00 (1-hour) per million. OpenAI estimates are limited to prompts up to 100,000 tokens. Gemini selects its rate tier by total prompt tokens and adds thinking tokens to candidate tokens for the output estimate; OpenAI and Claude already include billed reasoning in output usage. Requests with cache writes, unknown models or unavailable input/output usage have no cost estimate. Cache-write token counts are retained. Jev usage is retained when returned, but its cost remains unknown.
 
-Sources: [Claude model and pricing](https://platform.claude.com/docs/en/models/haiku-5-5/overview), [Claude structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [OpenAI reasoning and output budgets](https://developers.openai.com/api/docs/guides/reasoning), [Decisions pricing and usage](https://developers.openai.com/api/docs/guides/decisions), [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), [Gemini generation API](https://ai.google.dev/api/generate-content).
+Sources: [Claude Opus 5.5 model and pricing](https://platform.claude.com/docs/en/about-claude/pricing), [Claude structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [OpenAI reasoning and output budgets](https://developers.openai.com/api/docs/guides/reasoning), [Decisions pricing and usage](https://developers.openai.com/api/docs/guides/decisions), [Gemini 3.1 Pro pricing](https://ai.google.dev/gemini-api/docs/pricing), [Gemini generation API](https://ai.google.dev/api/generate-content).
 
 ## Verification
 
