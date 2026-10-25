@@ -16,10 +16,14 @@ const json = (res, status, data) => {
 export default async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, {error: 'Method not allowed'});
   try {
-    const {fixtures, predictions, providerPredictions, forecastAttempts} = await getStore().getFixtureView();
+    const store=getStore();
+    const {fixtures, predictions, providerPredictions, forecastAttempts} = await store.getFixtureView();
     if (!fixtures) return json(res, 503, {error: 'Fixtures have not been loaded yet. Please check back shortly.', configured: !!process.env.AI_GATEWAY_API_KEY});
     const now = Date.now();
-    const expectedRunKey = expectedWeeklyRunKey(now);
+    const competition=await store.getCompetition?.();
+    let expectedRunKey = expectedWeeklyRunKey(now);
+    if(competition?.active&&competition.startedAt&&Date.parse(competition.startedAt)>Date.parse(expectedRunKey.slice('weekly:'.length)))
+      expectedRunKey=`competition:${new Date(competition.startedAt).toISOString()}`;
     const matches = fixtures.matches
       .map(m => {
         const entry = predictions[m.id];

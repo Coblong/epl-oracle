@@ -9,11 +9,16 @@ import fixturesHandler from '../api/fixtures.mjs';
 import resultsHandler from '../api/results.mjs';
 import fixturesCronHandler from '../api/cron/fixtures.mjs';
 import predictionsHandler from '../api/cron/predictions.mjs';
+import activateHandler from '../api/competition/activate.mjs';
+import manualPredictionHandler from '../api/cron/predictions/manual.mjs';
 import {predictFixtures} from '../lib/prediction-job.mjs';
-import {generateWeeklyPredictions as runWeekly} from '../lib/weekly-predictions.mjs';
+import {generateCompetitionPredictions as runCompetition,generateWeeklyPredictions as runWeekly} from '../lib/weekly-predictions.mjs';
 import {parsePrediction} from '../lib/football.mjs';
 import {scoreAnswer} from './support/score-distribution.mjs';
 import {forecastPanel} from '../forecast-view.mjs';
+import {renderResultCard} from '../result-card.mjs';
+import {renderGameweekView} from '../gameweek-view.mjs';
+import {renderCompetitionStandings} from '../leaderboard.mjs';
 
 const enabled=!!process.env.TEST_DATABASE_URL;
 const schema='epl_oracle_test_'+randomUUID().replaceAll('-','');
@@ -364,7 +369,7 @@ dbtest('Results expose earned and mean-assigned O Scores without adding missing 
   assert.equal(result.forecasts.claude,undefined);
   assert.deepEqual(result.missingProviders,['claude','chatgpt','gemini']);
   assert.deepEqual(page.providerSummaries.claude.oScoreDiagnostics,
-    {scope:'full_history',earnedCount:0,meanAssignedCount:1,sampleCount:1,total:0.5,average:0.5});
+    {scope:'full_history',eligibleMatchCount:2,submittedCount:0,missingCount:2,earnedCount:0,meanAssignedCount:1,unavailableCount:1,sampleCount:1,total:0.5,average:0.5});
   const allMissing=page.results.find(row=>row.id===withoutForecast.id);
   assert.deepEqual(allMissing.actualScore,[0,0]);
   assert.deepEqual(allMissing.missingProviders,['jev','openai','claude','chatgpt','gemini']);
@@ -375,6 +380,9 @@ dbtest('Results expose earned and mean-assigned O Scores without adding missing 
   assert.deepEqual(api.competition,{active:false,startedAt:null,includedFixtureBoundary:null});
   assert.equal(api.scoringRules.id,'oracle-score-v1');
   assert.equal(api.results.find(row=>row.id===match.id).oScores.claude.source,'mean_assigned');
+  assert.equal(api.sharedComparison.oScoreDiagnostics.scope,'shared_all_agents');
+  assert.equal(api.sharedComparison.oScoreDiagnostics.resolved,0);
+  assert.equal(api.sharedComparison.oScoreDiagnostics.providerSummaries.jev.sampleCount,0);
 
   await store.refreshFixtures({matches:[],teams,source:source.fixtures.source,updatedAt:'2099-10-14T08:00:00Z',raw:[
     {id:match.id,event:2,kickoff_time:match.kickoff,team_h:1,team_a:2,team_h_score:4,team_a_score:1,finished:true},
@@ -386,9 +394,9 @@ dbtest('Results expose earned and mean-assigned O Scores without adding missing 
   assert.equal(correctedResult.oScores.openai.value,1);
   assert.equal(correctedResult.oScores.claude.value,1.5);
   assert.deepEqual(corrected.providerSummaries.jev.oScoreDiagnostics,
-    {scope:'full_history',earnedCount:1,meanAssignedCount:0,sampleCount:1,total:2,average:2});
+    {scope:'full_history',eligibleMatchCount:2,submittedCount:1,missingCount:1,earnedCount:1,meanAssignedCount:0,unavailableCount:1,sampleCount:1,total:2,average:2});
   assert.deepEqual(corrected.providerSummaries.claude.oScoreDiagnostics,
-    {scope:'full_history',earnedCount:0,meanAssignedCount:1,sampleCount:1,total:1.5,average:1.5});
+    {scope:'full_history',eligibleMatchCount:2,submittedCount:0,missingCount:2,earnedCount:0,meanAssignedCount:1,unavailableCount:1,sampleCount:1,total:1.5,average:1.5});
 });
 
 dbtest('daily refresh settles provisional final scores, retains both pre-kickoff forecasts, and leaves an unconfirmed 90-minute match unresolved',async()=>{
@@ -509,6 +517,76 @@ dbtest('the Results API paginates the current season in groups of twenty',async(
   assert.equal(first.hasMore,true);
   assert.equal(secondPage.results.length,1);
   assert.equal(secondPage.hasMore,false);
+});
+
+dbtest('gameweek summaries use the full official season, preserve postponed rounds and recalculate corrections',async()=>{
+  const kickoff=(day,hour='12')=>`2026-09-${String(day).padStart(2,'0')}T${hour}:00:00Z`;
+  const fixtures=[
+    {id:201,gameweek:1,kickoff:kickoff(1),home,away},
+    {id:202,gameweek:1,kickoff:kickoff(2),home,away},
+    {id:203,gameweek:1,kickoff:kickoff(3),home,away},
+    ...Array.from({length:21},(_,index)=>({id:204+index,gameweek:2,kickoff:kickoff(index+1,'15'),home,away})),
+  ];
+  const source=baseline();source.predictions={};source.results=[{...result,id:199,kickoff:'2025-09-01T12:00:00Z'}];
+  source.fixtures={...source.fixtures,matches:fixtures,updatedAt:'2026-10-01T08:00:00Z'};
+  await store.importSnapshot(source);
+  const scored=fixtures[0];
+  for(const [provider,score,at] of [
+    ['jev',[5,0],'2026-08-31T08:00:00Z'],['openai',[4,0],'2026-08-31T09:00:00Z'],
+  ]){
+    const forecast={...prediction,score,generatedAt:at};
+    const run=await store.beginRun(`gameweek-${provider}`,at);
+    await store.saveSnapshot(run.id,scored.id,scored);
+    await store.recordAttempt({runId:run.id,fixtureId:scored.id,provider,status:'started',attemptAt:at});
+    assert.equal(await store.savePrediction({runId:run.id,fixtureId:scored.id,provider,
+      matchSignature:JSON.stringify(scored),prediction:forecast,completedAt:at}),true);
+  }
+  const raw=fixtures.map(f=>({id:f.id,event:f.gameweek,team_h:1,team_a:2,kickoff_time:f.kickoff,finished:true,team_h_score:2,team_a_score:1}));
+  raw[1]={...raw[1],cancelled:true,finished:false,team_h_score:null,team_a_score:null};
+  raw[2]={id:203,event:null,team_h:1,team_a:2,kickoff_time:null,finished:false,started:false};
+  await store.refreshFixtures({matches:[{...fixtures[2],gameweek:null,kickoff:null,fixtureStatus:'awaiting_date'}],raw,teams,
+    source:source.fixtures.source,updatedAt:'2026-10-01T08:00:00Z'});
+
+  const first=await response(resultsHandler,{method:'GET',url:'/api/results?page=1'});
+  const second=await response(resultsHandler,{method:'GET',url:'/api/results?page=2'});
+  assert.equal(first.results.length,20);
+  assert.equal(second.results.length,3);
+  assert.deepEqual(first.gameweeks,second.gameweeks);
+  const [weekOne,weekTwo]=first.gameweeks;
+  assert.deepEqual(weekOne.counts,{fixtures:2,completed:1,remaining:1,cancelled:1});
+  assert.equal(weekOne.complete,false);
+  assert.equal(weekOne.oScoreSummaries.jev.total,4);
+  assert.equal(weekOne.oScoreSummaries.openai.total,3);
+  assert.equal(weekOne.oScoreSummaries.claude.total,3.5);
+  assert.equal(weekOne.providerSummaries.claude.resolved,0);
+  assert.deepEqual(weekTwo.counts,{fixtures:21,completed:21,remaining:0,cancelled:0});
+  assert.equal(weekTwo.complete,true);
+
+  await store.refreshFixtures({matches:[],raw:raw.filter(fixture=>fixture.id!==203),teams,
+    source:source.fixtures.source,updatedAt:'2026-10-01T09:00:00Z'});
+  const temporarilyMissing=(await response(resultsHandler)).gameweeks[0];
+  assert.deepEqual(temporarilyMissing.counts,{fixtures:2,completed:1,remaining:1,cancelled:1});
+  assert.equal(temporarilyMissing.complete,false);
+
+  raw[0]={...raw[0],team_h_score:4,team_a_score:1};
+  await store.refreshFixtures({matches:[{...fixtures[2],gameweek:null,kickoff:null,fixtureStatus:'awaiting_date'}],raw,teams,
+    source:source.fixtures.source,updatedAt:'2026-10-02T08:00:00Z'});
+  const corrected=(await response(resultsHandler)).gameweeks[0];
+  assert.equal(corrected.oScoreSummaries.jev.total,2);
+  assert.equal(corrected.oScoreSummaries.openai.total,1);
+  assert.equal(corrected.oScoreSummaries.claude.total,1.5);
+
+  raw[2]={...raw[2],event:2,kickoff_time:'2026-10-30T12:00:00Z'};
+  await store.refreshFixtures({matches:[{...fixtures[2],gameweek:2,kickoff:raw[2].kickoff_time}],raw,teams,
+    source:source.fixtures.source,updatedAt:'2026-10-03T08:00:00Z'});
+  const reassigned=(await response(resultsHandler)).gameweeks;
+  assert.deepEqual(reassigned.map(week=>[week.gameweek,week.counts.fixtures,week.counts.remaining]),[[1,1,0],[2,22,1]]);
+  assert.equal(reassigned[0].counts.cancelled,1);
+
+  await store.refreshFixtures({matches:[],raw:[{id:300,event:1,team_h:1,team_a:2,kickoff_time:'2027-08-10T12:00:00Z',
+    finished:true,team_h_score:1,team_a_score:0}],teams,source:source.fixtures.source,updatedAt:'2027-09-01T08:00:00Z'});
+  const nextSeason=(await response(resultsHandler)).gameweeks;
+  assert.deepEqual(nextSeason.map(week=>[week.gameweek,week.counts.fixtures]),[[1,1]]);
 });
 
 dbtest('lost or missing fixture data stays awaiting update and only an explicit cancellation removes it from totals',async()=>{
@@ -901,6 +979,157 @@ dbtest('all five agents survive the weekly job and appear in read APIs and compl
   }
   assert.equal(completed.sharedComparison.resolved,1);
   assert.deepEqual(completed.sharedComparison.providerIds,ids);
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.scope,'shared_all_agents');
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.resolved,1);
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.providerSummaries.jev.total,0);
+  assert.equal(completed.sharedComparison.oScoreDiagnostics.providerSummaries.gemini.sampleCount,1);
+});
+
+dbtest('five-provider evidence flows through corrected results and O Score views without activating competition',async()=>{
+  const ids=['jev','openai','claude','chatgpt','gemini'];
+  const kickoff=['2099-10-09T12:00:00Z','2099-10-10T12:00:00Z','2099-10-11T12:00:00Z'];
+  const matches=kickoff.map((date,index)=>({...structuredClone(match),id:101+index,gameweek:7,kickoff:date}));
+  const source=baseline();source.fixtures={...source.fixtures,matches,updatedAt:'2099-10-07T07:59:00Z'};source.predictions={};source.results=[];
+  await store.importSnapshot(source);
+  const scoreGrid={
+    101:{jev:[5,0],openai:[4,0],claude:[1,0],chatgpt:[2,2],gemini:[0,5]},
+    102:{jev:[4,1],openai:[4,0],claude:null,chatgpt:null,gemini:[3,1]},
+    103:{jev:null,openai:null,claude:null,chatgpt:null,gemini:null},
+  };
+  const evidence=[];
+  const providers=Object.fromEntries(ids.map(id=>[id,async input=>{
+    evidence.push({provider:id,matchId:input.id,input:structuredClone(input)});
+    const score=scoreGrid[input.id][id];
+    if(!score)throw new Error('mock provider unavailable');
+    const outcome=score[0]===score[1]?'draw':score[0]>score[1]?'home':'away';
+    return {outcome,score,probabilities:{home:.6,draw:.25,away:.15},model:id,generatedAt:'2099-10-07T08:00:00Z'};
+  }]));
+  assert.deepEqual(await generateWeeklyPredictions(store,providers,'2099-10-07T08:00:00Z',async()=>{}),{targeted:3,updated:8,failed:7});
+  assert.equal(evidence.length,15);
+  for(const m of matches){
+    const copies=evidence.filter(item=>item.matchId===m.id).map(item=>item.input);
+    assert.equal(copies.length,5);
+    for(const copy of copies)assert.deepEqual(copy,m);
+  }
+  const completedRaw=matches.map((m,index)=>({id:m.id,event:7,kickoff_time:m.kickoff,team_h:1,team_a:2,team_h_score:[5,4,2][index],team_a_score:[0,1,2][index],finished:true}));
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-12T15:00:00Z',raw:completedRaw});
+  const api=await response(resultsHandler);
+  assert.equal(api.competition.active,false);
+  assert.equal(api.competition.includedFixtureBoundary,null);
+  assert.deepEqual(api.agents.map(agent=>agent.id),ids);
+  assert.equal(api.results.length,3);
+  const scores=Object.fromEntries(ids.map(id=>[id,api.results.find(row=>row.id===101).oScores[id].value]));
+  assert.deepEqual(scores,{jev:0,openai:1,claude:4,chatgpt:6,gemini:11});
+  const allMissing=api.results.find(row=>row.id===103);
+  assert.deepEqual(allMissing.actualScore,[2,2]);
+  assert.deepEqual(allMissing.missingProviders,ids);
+  assert.ok(ids.every(id=>allMissing.oScores[id].value===null));
+  const fractional=api.results.find(row=>row.id===102);
+  assert.equal(fractional.oScores.claude.source,'mean_assigned');
+  assert.equal(fractional.oScores.claude.value,2/3);
+  assert.equal(fractional.oScores.chatgpt.value,2/3);
+  assert.equal(api.providerSummaries.jev.oScoreDiagnostics.sampleCount,2);
+  assert.equal(api.providerSummaries.claude.oScoreDiagnostics.earnedCount,1);
+  assert.equal(api.providerSummaries.claude.oScoreDiagnostics.meanAssignedCount,1);
+  assert.equal(api.providerSummaries.claude.resolved,1);
+  assert.equal(api.providerSummaries.claude.brierSampleCount,1);
+  assert.equal(api.gameweeks.find(week=>week.gameweek===7).counts.completed,3);
+  assert.equal(api.gameweeks.find(week=>week.gameweek===7).counts.remaining,0);
+  assert.equal(api.gameweeks.find(week=>week.gameweek===7).oScoreSummaries.claude.sampleCount,2);
+  assert.match(renderResultCard(allMissing),/Final score 2 : 2/);
+  assert.match(renderResultCard(allMissing),/No prediction/);
+  assert.match(renderResultCard(allMissing),/No earned O Score exists/);
+  assert.doesNotMatch(renderResultCard(allMissing),/O Score<\/span><strong>0/);
+  assert.equal(renderCompetitionStandings(api).active,false);
+  assert.match(renderGameweekView(api).message,/Competition has not started/);
+  const attemptCount=evidence.length;
+  await response(resultsHandler);
+  assert.equal(evidence.length,attemptCount,'read API must not invoke providers');
+
+  const correctedRaw=completedRaw.map(row=>row.id===101?{...row,team_h_score:5,team_a_score:1}:row);
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-13T15:00:00Z',raw:correctedRaw});
+  const corrected=await response(resultsHandler);
+  assert.equal(corrected.competition.active,false);
+  assert.deepEqual(Object.fromEntries(ids.map(id=>[id,corrected.results.find(row=>row.id===101).oScores[id].value])),{jev:1,openai:2,claude:5,chatgpt:5,gemini:10});
+  assert.equal(corrected.providerSummaries.claude.oScoreDiagnostics.total,17/3);
+  assert.equal(corrected.gameweeks.find(week=>week.gameweek===7).oScoreSummaries.claude.total,17/3);
+  assert.match(renderResultCard(corrected.results.find(row=>row.id===101)),/Final score 5 : 1/);
+
+  const future={...structuredClone(match),id:104,gameweek:7,kickoff:'2099-10-15T12:00:00Z'};
+  const futureRaw={id:104,event:7,kickoff_time:future.kickoff,team_h:1,team_a:2,team_h_score:null,team_a_score:null,started:false,finished:false,finished_provisional:false};
+  await store.refreshFixtures({matches:[...matches,future],teams,source:'test',updatedAt:'2099-10-14T15:00:00Z',raw:[...correctedRaw,futureRaw]});
+  assert.ok((await store.getFixtures()).matches.some(fixture=>fixture.id===104));
+
+  const activated=await store.activateCompetition('2099-10-10T00:00:00Z');
+  assert.equal(activated.active,true);
+  assert.equal(activated.includedFixtureBoundary.timestamp,'2099-10-10T00:00:00.000Z');
+  assert.equal((await store.activateCompetition('2099-10-11T00:00:00Z')).startedAt,'2099-10-10T00:00:00.000Z');
+  const active=await response(resultsHandler);
+  assert.equal(active.competition.active,true);
+  assert.equal(active.competition.startedAt,'2099-10-10T00:00:00.000Z');
+  assert.equal(active.competitionSummaries.jev.resolved,1);
+  assert.equal(active.competitionSummaries.jev.sampleCount,1);
+  assert.equal(active.competitionSummaries.jev.brierSampleCount,0);
+  const activeWeek=active.gameweeks.find(week=>week.gameweek===7);
+  assert.deepEqual(activeWeek.competitionCounts,{fixtures:3,completed:2,remaining:1,cancelled:0});
+  assert.equal(activeWeek.competitionSummaries.jev.resolved,1);
+  assert.equal(activeWeek.competitionSummaries.jev.brierSampleCount,0);
+
+  // A postponed fixture can temporarily lose its kickoff and event. Preserve
+  // it as a potentially eligible member so finished fixtures do not settle
+  // the active gameweek or announce a winner prematurely.
+  await store.refreshFixtures({matches:[{...future,kickoff:null,gameweek:null}],teams,source:'test',
+    updatedAt:'2099-10-15T15:00:00Z',raw:[...correctedRaw,{...futureRaw,event:null,kickoff_time:null}]});
+  assert.equal((await store.getFixtures()).matches.find(fixture=>fixture.id===104).kickoff,null);
+  const postponed=await response(resultsHandler);
+  const postponedWeek=postponed.gameweeks.find(week=>week.gameweek===7);
+  assert.deepEqual(postponedWeek.competitionCounts,{fixtures:3,completed:2,remaining:1,cancelled:0});
+  assert.equal(postponedWeek.competitionComplete,false);
+  assert.equal(postponedWeek.competitionSummaries.jev.resolved,1);
+  assert.match(renderGameweekView(postponed).message,/provisional/i);
+  assert.doesNotMatch(renderGameweekView(postponed).message,/winner/i);
+
+  const rescheduledAndCompleted={...futureRaw,event:7,kickoff_time:'2099-10-16T12:00:00Z',
+    finished:true,team_h_score:2,team_a_score:0};
+  await store.refreshFixtures({matches:[],teams,source:'test',updatedAt:'2099-10-16T13:00:00Z',raw:[...correctedRaw,rescheduledAndCompleted]});
+  const settled=await response(resultsHandler);
+  const settledWeek=settled.gameweeks.find(week=>week.gameweek===7);
+  assert.deepEqual(settledWeek.competitionCounts,{fixtures:3,completed:3,remaining:0,cancelled:0});
+  assert.equal(settledWeek.competitionComplete,true);
+});
+
+dbtest('fixture availability treats the current activation run as fresh',async()=>{
+  const now=new Date();
+  const startedAt=new Date(now.getTime()-60_000).toISOString();
+  const kickoff=new Date(now.getTime()+5*24*60*60*1000).toISOString();
+  const upcoming={...structuredClone(match),kickoff};
+  const source=baseline();source.fixtures={...source.fixtures,matches:[upcoming],updatedAt:now.toISOString()};source.predictions={};source.results=[];
+  await store.importSnapshot(source);
+  await store.activateCompetition(startedAt);
+  const result=await runCompetition(store,{jev:async()=>({...prediction,generatedAt:new Date(now.getTime()+1_000).toISOString()})},startedAt,now,async()=>{},()=>new Date(now.getTime()+2_000));
+  assert.equal(result.updated,1);
+  const fixtureView=await response(fixturesHandler);
+  assert.equal(fixtureView.matches[0].forecastStates.jev.availability,'fresh');
+});
+
+test('activation and manual prediction routes require an explicit secret and reject unauthorized requests',async()=>{
+  const secret=process.env.CRON_SECRET;
+  const backend=process.env.PERSISTENCE_BACKEND;
+  const invoke=async(handler,request)=>{
+    let body;const res={setHeader(){},end(text){body=JSON.parse(text);}};
+    await handler(request,res);return {status:res.statusCode,body};
+  };
+  try{
+    delete process.env.CRON_SECRET;
+    assert.equal((await invoke(activateHandler,{method:'POST',headers:{}})).status,503);
+    assert.equal((await invoke(manualPredictionHandler,{method:'POST',headers:{}})).status,503);
+    process.env.CRON_SECRET='test-only-secret';
+    assert.equal((await invoke(activateHandler,{method:'POST',headers:{authorization:'Bearer wrong'}})).status,401);
+    assert.equal((await invoke(manualPredictionHandler,{method:'POST',headers:{authorization:'Bearer wrong'}})).status,401);
+  }finally{
+    if(secret===undefined)delete process.env.CRON_SECRET;else process.env.CRON_SECRET=secret;
+    if(backend===undefined)delete process.env.PERSISTENCE_BACKEND;else process.env.PERSISTENCE_BACKEND=backend;
+  }
 });
 
 dbtest('failed paid responses retain usage per attempt and retry without replacing successful agents or old forecasts',async()=>{

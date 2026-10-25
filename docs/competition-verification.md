@@ -1,0 +1,27 @@
+# Competition and scoring verification
+
+Competition activation is persisted once in Neon metadata by the secret-protected `POST /api/competition/activate` endpoint. It stores the server's current timestamp and cannot be reset by retries. The included boundary is kickoff at or after that timestamp; earlier results remain outside the competitive cohort. The endpoint requires `CRON_SECRET` and validated `PERSISTENCE_BACKEND=neon` and accepts no caller-supplied timestamp.
+
+The secret-protected `POST /api/cron/predictions/manual` endpoint runs the activation cohort's first prediction job. It requires an active competition, uses a stable run key tied to the activation instant, targets fixtures in the following ten days, and retries only during the first 24 hours. Existing database claims and snapshots keep retries idempotent. It fails closed when `CRON_SECRET` is absent. The standard weekly schedule and time guards are unchanged. Fixture and result refresh continues through the existing GitHub Actions workflow.
+
+The Results API includes activation-scoped overall and gameweek summaries once active. Only completed eligible forecasts with kickoff at or after activation contribute to metrics; current-season gameweek completion includes all known fixtures in the boundary, including future ones. No rankings or winners appear before scored samples exist. Historical and per-match O Scores remain available separately. Reading results never calls a prediction provider.
+
+## Deployment and verification
+
+Activation and summary changes use existing PostgreSQL metadata and JSON fields and require no new schema migration. The existing checksummed `003-five-agents` migration must be applied by the Vercel `npm run db:migrate` build command before the five-agent functions are deployed. Configure `CRON_SECRET`, the server-only provider keys and validated Neon settings described in [prediction agents](prediction-agents.md) and [Neon migration](neon-migration.md), then deploy through that build. The weekly prediction cron remains configured in `vercel.json`; activation does not change its schedule or guard.
+
+For a release check, run `npm ci`, then `npm test`. Set `TEST_DATABASE_URL` to an isolated PostgreSQL test database to run the persistence and API integration suite; tests create and remove their own schema. The integrated five-provider test uses mocked adapters, verifies identical saved fixture evidence, missing and mean-assigned O Scores, corrected actual results, disabled-by-default metadata, idempotent activation, kickoff-scoped summaries, and provider-free Results reads. Do not point tests or previews at the production database.
+
+The complete activation-release suite passed 172 tests with no skips against the isolated local PostgreSQL 14.17 database. CI separately provisions PostgreSQL 17. The database version used locally is not the production database.
+
+On 24 October 2026, authenticated metadata-only GETs returned HTTP 200 and listed each configured target: Jev through Vercel AI Gateway (`typesafe-ai/jev`), Decisions API (`gpt-6-luna`) and ChatGPT (`gpt-6.1-sol`) through OpenAI's model list, Claude (`claude-haiku-5-5`), and Gemini (`gemini-3.1-flash-lite`). The four required environment-variable names were present in the ignored local configuration; credential values were not displayed or recorded. These zero-token metadata checks confirm endpoint access and model listing only. They do not verify generation adapter request formats, generation permission, quota, latency, or cost. Forecast generation is the first operation that can consume model tokens; this verification makes no generation calls.
+
+Usage and cost remain uncertain until actual forecast responses are collected. Use the existing attempt usage and cost metadata described in [prediction agents](prediction-agents.md); Jev's cost remains unknown when the provider does not return a usable cost figure. No paid generation call was made for this verification.
+
+## Browser check
+
+Desktop and mobile checks used a local preview backed by the fixture and Results API payloads produced by the isolated PostgreSQL run. The initial Results request intentionally returned a preview-only error; the page showed the unavailable competition-status message and a retry control, then cleared its error states and rendered the API response after retry. Results showed the all-missing match without fabricated forecasts or scores, fractional mean-assigned scores, full-history totals, and historical gameweek counts while competition remained disabled.
+
+At widths 600, 761, 780, 820, 821, 1101, 1199 and 1200 pixels, document width matched the viewport and the forecast row content fit inside each card. Fixture cards switch to one column through 820px, two columns from 821px through 1199px, then three columns at 1200px where each card has enough room for its forecast rows. The 600px check included expanded Details content. Search and gameweek filtering were also exercised; Results pagination and the 21-match API paging path are covered by the PostgreSQL suite.
+
+The release PR is based on current `main` and includes the remaining reviewed leaderboard, gameweek, result-card and verification work plus activation. Keep the PR ready and unmerged until explicitly authorized. Production activation is a separate protected POST after deployment; its stored server timestamp is the real cohort boundary.

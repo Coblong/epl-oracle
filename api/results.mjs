@@ -3,7 +3,6 @@ import {fixtureFreshness} from '../fixture-freshness.mjs';
 import {O_SCORE_RULES} from '../lib/o-score.mjs';
 import {getStore} from '../lib/store.mjs';
 
-const competition=Object.freeze({active:false,startedAt:null,includedFixtureBoundary:null});
 
 const json = (res, status, data) => {
   res.statusCode = status;
@@ -17,7 +16,9 @@ export default async function handler(req, res) {
   try {
     const requestedPage=req.query?.page ?? (req.url ? new URL(req.url,'http://localhost').searchParams.get('page') : null);
     const store=getStore();
-    const resultPage=await store.getResultsPage({page:requestedPage ?? 1,pageSize:20});
+    const competition=await store.getCompetition?.()??{active:false,startedAt:null,includedFixtureBoundary:null};
+    const resultPage=await store.getResultsPage({page:requestedPage ?? 1,pageSize:20,
+      competitionStartedAt:competition.active?competition.startedAt:null});
     const fixtures=await store.getFixtures();
     return json(res, 200, {...resultPage,agents:AGENTS,competition,scoringRules:O_SCORE_RULES,
       fixtureRefresh:fixtureFreshness(fixtures?.updatedAt)});

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {eligibleWeeklyFixtures, expectedWeeklyRunKey, generateWeeklyPredictions, weeklyRunContext} from '../lib/weekly-predictions.mjs';
+import {eligibleWeeklyFixtures, expectedWeeklyRunKey, generateCompetitionPredictions, generateWeeklyPredictions, competitionRunContext, weeklyRunContext} from '../lib/weekly-predictions.mjs';
 
 test('weekly run starts at 09:00 London in winter and summer and expires at Thursday 09:00', () => {
   assert.equal(weeklyRunContext('2026-01-07T08:59:59Z'), null);
@@ -34,6 +34,30 @@ test('weekly fixture selection uses the scheduled ten-day half-open interval and
     {id: 4, kickoff: '2026-01-07T09:00:00Z'},
   ];
   assert.deepEqual(eligibleWeeklyFixtures(fixtures, now, context), [included]);
+});
+
+test('competition manual run is stable, starts at activation and is bounded to ten days and 24 hours', async () => {
+  const startedAt='2026-10-24T12:00:00.000Z';
+  const context=competitionRunContext(startedAt,'2026-10-24T12:01:00Z');
+  assert.equal(context.key,`competition:${startedAt}`);
+  assert.equal(context.scheduledAt.toISOString(),startedAt);
+  assert.equal(context.windowStart.toISOString(),startedAt);
+  assert.equal(context.windowEnd.toISOString(),'2026-11-03T12:00:00.000Z');
+  assert.equal(context.recoveryUntil.toISOString(),'2026-10-25T12:00:00.000Z');
+  assert.equal(competitionRunContext(startedAt,'2026-10-25T12:00:00Z'),null);
+
+  const matches=[
+    {id:1,kickoff:'2026-10-24T12:00:30Z'},
+    {id:2,kickoff:'2026-10-24T12:02:00Z'},
+    {id:3,kickoff:'2026-11-03T12:00:00Z'},
+    {id:4,kickoff:null},
+  ];
+  const store=fakeStore(matches,'2026-10-24T12:00:00Z');
+  let calls=0;
+  const result=await generateCompetitionPredictions(store,{jev:async()=>{calls++;return {}; }},startedAt,'2026-10-24T12:01:00Z',async()=>{});
+  assert.deepEqual(result,{targeted:1,updated:1,failed:0});
+  assert.equal(calls,1);
+  assert.deepEqual(store.calls[0],['run',`competition:${startedAt}`,startedAt]);
 });
 
 function fakeStore(matches, updatedAt, snapshots = []) {
