@@ -69,7 +69,7 @@ async function loadResults(page=1,append=false){
     $('#results-load-more').hidden=!d.hasMore;
   }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');$('#competition-state').textContent='Competition status unavailable. Retry loading results.';$('#competition-state').classList.add('error');$('#results-retry').hidden=false;}
 }
-const pages=new Set(['predictions','leaderboard','standings','stats','results']);
+const pages=new Set(['predictions','leaderboard','standings','results']);
 function renderPage(){
   const requested=location.hash.slice(1);
   const page=pages.has(requested)?requested:'predictions';
@@ -81,7 +81,8 @@ function renderPage(){
   const homeLink=$('[data-home-link]');
   if(page==='predictions')homeLink.setAttribute('aria-current','page');
   else homeLink.removeAttribute('aria-current');
-  document.title=`${page==='predictions'?'Predictions':page[0].toUpperCase()+page.slice(1)} — The EPL Oracle`;
+  const pageTitle={predictions:'Predictions',leaderboard:'Leaderboard',standings:'Game Weeks',results:'Results'}[page];
+  document.title=`${pageTitle} — The EPL Oracle`;
 }
 window.addEventListener('hashchange',renderPage);
 renderPage();

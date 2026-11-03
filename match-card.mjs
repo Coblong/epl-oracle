@@ -41,6 +41,8 @@ function agentRow(match,agent,forecast,state={}){
 
 export function renderMatchCard(match){
   const forecasts=match.predictions??{jev:match.prediction};
+  const hasPredictions=AGENTS.some(agent=>forecasts?.[agent.id]);
   const status=fixtureStatus(match);
-  return `<article class="card" id="match-${escape(match.id)}" aria-label="${escape(match.home.name)} versus ${escape(match.away.name)}"><div class="card-top"><span class="gw">GAMEWEEK ${escape(match.gameweek??'TBC')}</span><span>${escape(status)}${match.provisional?' · provisional':''}</span></div><div class="teams">${team(match.home)}<div><div class="score waiting">VS</div><div class="score-caption">FIXTURE</div></div>${team(match.away)}</div><div class="agent-rows">${AGENTS.map(agent=>agentRow(match,agent,forecasts[agent.id],match.forecastStates?.[agent.id])).join('')}</div></article>`;
+  const agentRows=hasPredictions?`<div class="agent-rows">${AGENTS.map(agent=>agentRow(match,agent,forecasts[agent.id],match.forecastStates?.[agent.id])).join('')}</div>`:'';
+  return `<article class="card" id="match-${escape(match.id)}" aria-label="${escape(match.home.name)} versus ${escape(match.away.name)}"><div class="card-top"><span class="gw">GAMEWEEK ${escape(match.gameweek??'TBC')}</span><span>${escape(status)}${match.provisional?' · provisional':''}</span></div><div class="teams">${team(match.home)}<div><div class="score waiting">VS</div><div class="score-caption">FIXTURE</div></div>${team(match.away)}</div>${agentRows}</article>`;
 }
