@@ -16,26 +16,31 @@ $('#matches').innerHTML=visible.length?[...groups.values()].map(group=>`<div cla
 function notice(text,error=false){$('#notice').textContent=text;$('#notice').classList.toggle('error',error);}
 async function request(url){const r=await fetch(url);const data=await r.json();if(!r.ok)throw new Error(data.error||'Request failed. Please retry.');return data;}
 function renderFreshness(updatedAt){const status=fixtureFreshness(updatedAt);const el=$('#fixture-freshness');el.hidden=!status.stale;el.textContent=status.message;}
-async function load(){$('#refresh').disabled=true;notice('Fetching official Premier League fixtures…');try{const d=await request('/api/fixtures');matches=d.matches;renderFreshness(d.updatedAt);const previous=$('#gameweek').value;$('#gameweek').innerHTML='<option value="all">All gameweeks</option>'+[...new Set(matches.map(m=>m.gameweek).filter(x=>x!=null))].sort((a,b)=>a-b).map(g=>`<option value="${g}">Gameweek ${g}</option>`).join('');$('#gameweek').value=[...$('#gameweek').options].some(x=>x.value===previous)?previous:'all';$('#fixture-count').textContent=matches.length;$('#updated').textContent=`Updated ${fmt(d.updatedAt,{hour:'2-digit',minute:'2-digit'})} · ${fmt(d.updatedAt,{day:'numeric',month:'short'})}`;render();const message=forecastNotice(d.providersConfigured??{jev:d.configured,openai:false});notice(message.text,message.error);}catch(e){notice(e.message,true);if(!matches.length)$('#matches').innerHTML='<div class="empty">Fixtures are unavailable right now. Use Refresh to try again.</div>';}finally{$('#refresh').disabled=false;}}
+async function load(){notice('Fetching official Premier League fixtures…');try{const d=await request('/api/fixtures');matches=d.matches;renderFreshness(d.updatedAt);const previous=$('#gameweek').value;$('#gameweek').innerHTML='<option value="all">All gameweeks</option>'+[...new Set(matches.map(m=>m.gameweek).filter(x=>x!=null))].sort((a,b)=>a-b).map(g=>`<option value="${g}">Gameweek ${g}</option>`).join('');$('#gameweek').value=[...$('#gameweek').options].some(x=>x.value===previous)?previous:'all';$('#fixture-count').textContent=matches.length;$('#updated').textContent=`Updated ${fmt(d.updatedAt,{hour:'2-digit',minute:'2-digit'})} · ${fmt(d.updatedAt,{day:'numeric',month:'short'})}`;render();const message=forecastNotice(d.providersConfigured??{jev:d.configured,openai:false});notice(message.text,message.error);}catch(e){notice(e.message,true);if(!matches.length)$('#matches').innerHTML='<div class="empty">Fixtures are unavailable right now. Use the browser reload to try again.</div>';}}
 function renderScoreboard(){
   if(!trackRecord)return;
-  const shared=$('#scoreboard-scope').value==='shared';
-  const historical=renderHistoricalLeaderboard(trackRecord,shared?'shared':'full');
-  $('#scoreboard-caption').textContent=historical.caption;
-  $('#scoreboard-list').innerHTML=historical.rows;
-  $('#track-notice').textContent=shared
-    ? `Shared scope uses results with eligible forecasts from all agents. Its Brier samples use valid probabilities from every agent. Totals ignore Results pagination.${historical.hasSamples?'':' No scored history is available in this scope.'}`
-    : `Full history uses retained completed results across seasons. Accuracy counts submitted forecasts; O Score may include mean-assigned missing forecasts. Totals ignore Results pagination.${historical.hasSamples?'':' No scored history is available in this scope.'}`;
   const competition=renderCompetitionStandings(trackRecord);
-  $('#competition-state').textContent=competition.message;
-  const activation=trackRecord.competition?.startedAt;
-  const boundaryText=activation
-    ? `Only matches kicking off on or after ${fmt(activation,{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})} London time count toward competition standings. Earlier results remain historical.`
-    : 'Competition standings and winners remain disabled until activation.';
-  $('#competition-help').textContent=boundaryText;
-  $('#gameweek-competition-help').textContent=boundaryText;
-  $('#competition-view').hidden=!competition.active;
-  $('#competition-list').innerHTML=competition.rows;
+  const select=$('#scoreboard-scope');
+  const competitionOption=select.querySelector('option[value="competition"]');
+  competitionOption.disabled=!competition.active;
+  if(select.value==='competition'&&!competition.active)select.value='shared';
+  const scope=select.value;
+  const head=$('#scoreboard-head');
+  if(scope==='competition'){
+    head.innerHTML='<tr><th scope="col">RANK</th><th scope="col">AGENT</th><th scope="col">TOTAL O SCORE</th><th scope="col">AVERAGE O SCORE</th><th scope="col">CORRECT RESULT</th><th scope="col">EXACT SCORE</th><th scope="col">BRIER SCORE</th></tr>';
+    $('#scoreboard-caption').textContent='Competition matches since activation. Lower O Score is better; equal totals share a rank.';
+    $('#scoreboard-list').innerHTML=competition.rows;
+    $('#track-notice').textContent=competition.message;
+  }else{
+    const historical=renderHistoricalLeaderboard(trackRecord,scope);
+    head.innerHTML='<tr><th scope="col">AGENT</th><th scope="col">TOTAL O SCORE</th><th scope="col">AVERAGE O SCORE</th><th scope="col">CORRECT RESULT</th><th scope="col">EXACT SCORE</th><th scope="col">BRIER SCORE</th></tr>';
+    $('#scoreboard-caption').textContent=historical.caption;
+    $('#scoreboard-list').innerHTML=historical.rows;
+    $('#track-notice').textContent=(scope==='shared'
+      ? 'Shared scope uses results with eligible forecasts from all agents. Its Brier samples use valid probabilities from every agent.'
+      : 'Full history uses retained completed results across seasons. Accuracy counts submitted forecasts; O Score may include mean-assigned missing forecasts.')
+      + ` Totals ignore Results pagination.${historical.hasSamples?'':' No scored history is available in this scope.'}`;
+  }
   renderGameweek();
 }
 function renderGameweek(){
@@ -60,14 +65,13 @@ async function loadResults(page=1,append=false){
     $('#track-notice').classList.remove('error');
     $('#results-notice').classList.remove('error');
     $('#gameweek-score-notice').classList.remove('error');
-    $('#competition-state').classList.remove('error');
     $('#results-retry').hidden=true;
     if(!append)$('#results-list').innerHTML='';
     if(d.results.length)$('#results-list').insertAdjacentHTML('beforeend',d.results.map(result=>renderResultCard(result)).join(''));
     else if(!append)$('#results-list').innerHTML='<div class="empty">No fixtures have finished yet this season.</div>';
     $('#results-notice').textContent=resultsTotal?`Showing ${Math.min(resultsTotal,resultsPage*d.pageSize)} of ${resultsTotal} fixtures.`:'No completed fixtures.';
     $('#results-load-more').hidden=!d.hasMore;
-  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');$('#competition-state').textContent='Competition status unavailable. Retry loading results.';$('#competition-state').classList.add('error');$('#results-retry').hidden=false;}
+  }catch(e){$('#results-notice').textContent=e.message;$('#results-notice').classList.add('error');$('#track-notice').textContent=e.message;$('#track-notice').classList.add('error');$('#gameweek-score-notice').textContent=e.message;$('#gameweek-score-notice').classList.add('error');$('#results-retry').hidden=false;}
 }
 const pages=new Set(['predictions','leaderboard','standings','results']);
 function renderPage(){
@@ -86,7 +90,7 @@ function renderPage(){
 }
 window.addEventListener('hashchange',renderPage);
 renderPage();
-$('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').addEventListener('input',()=>{limit=30;render();});$('#load-more').addEventListener('click',()=>{limit+=30;render();});$('#refresh').addEventListener('click',()=>load());
+$('#gameweek').addEventListener('change',()=>{limit=30;render();});$('#search').addEventListener('input',()=>{limit=30;render();});$('#load-more').addEventListener('click',()=>{limit+=30;render();});
 $('#scoreboard-scope').addEventListener('change',renderScoreboard);
 $('#gameweek-score-scope').addEventListener('change',event=>{selectedGameweek=Number(event.target.value)||null;renderGameweek();});
 $('#results-load-more').addEventListener('click',()=>loadResults(resultsPage+1,true));
