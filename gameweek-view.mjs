@@ -2,7 +2,8 @@ import {AGENTS} from './agents.mjs';
 import {rankCompetitionCohort} from './leaderboard.mjs';
 
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const number=value=>Number.isFinite(value)?value.toFixed(3):'—';
+const totalNumber=value=>Number.isFinite(value)?String(Math.round(value)):'—';
+const averageNumber=value=>Number.isFinite(value)?value.toFixed(2):'—';
 const percent=(value,count)=>Number.isFinite(value)&&count>0?`${Math.round(value*100)}%`:'—';
 
 export function renderGameweekView(data,selectedGameweek=null){
@@ -35,9 +36,9 @@ export function renderGameweekView(data,selectedGameweek=null){
     const brier=active?accuracy?.brierScore:sharedBrier.brierScore;
     const brierSamples=active?accuracy?.brierSampleCount:sharedBrier.brierSampleCount;
     const hasOScore=scoreDetails.sampleCount>0;
-    const total=hasOScore?number(scoreDetails.total):'—';
-    const average=hasOScore?number(scoreDetails.average):'—';
-    return `<tr>${rank}<th scope="row">${escape(agent.name)}</th><td>${total}<small>${scoreDetails.submittedCount??0} submitted · ${scoreDetails.missingCount??0} missing</small><small>${scoreDetails.earnedCount??0} earned · ${scoreDetails.meanAssignedCount??0} mean-assigned · ${scoreDetails.sampleCount??0} scored</small></td><td>${average}<small>per scored match</small></td><td>${percent(accuracy?.outcomeAccuracy,accuracy?.resolved??0)}<small>${accuracy?.outcomeCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${percent(accuracy?.scoreAccuracy,accuracy?.resolved??0)}<small>${accuracy?.scoreCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${Number.isFinite(brier)?brier.toFixed(3):'—'}<small>${brierSamples??0} shared probability samples</small></td></tr>`;
+    const total=hasOScore?totalNumber(scoreDetails.total):'—';
+    const average=hasOScore?averageNumber(scoreDetails.average):'—';
+    return `<tr>${rank}<th scope="row">${escape(agent.name)}</th><td>${total}<small>${scoreDetails.submittedCount??0} forecasts</small></td><td>${average}<small>per scored match</small></td><td>${percent(accuracy?.outcomeAccuracy,accuracy?.resolved??0)}<small>${accuracy?.outcomeCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${percent(accuracy?.scoreAccuracy,accuracy?.resolved??0)}<small>${accuracy?.scoreCorrect??0} of ${accuracy?.resolved??0} forecasts</small></td><td>${Number.isFinite(brier)?brier.toFixed(3):'—'}<small>${brierSamples??0} shared probability samples</small></td></tr>`;
   }).join(''):`<tr><td colspan="6" class="leaderboard-empty">No current-season gameweek data is available.</td></tr>`;
   let message='No current-season gameweek data is available.';
   if(week){
