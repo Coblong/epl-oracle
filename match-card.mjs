@@ -1,4 +1,5 @@
 import {AGENTS} from './agents.mjs';
+import {providerFailureMessage} from './lib/provider-errors.mjs';
 
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(date,options)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',...options}).format(new Date(date));
@@ -34,15 +35,17 @@ function agentRow(match,agent,forecast,state={}){
   const time=generated?`<time datetime="${escape(generated)}">${fmt(generated,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} London</time>`:'Not generated';
   const freshness=forecast?.stale?'Based on earlier fixture information.':'Based on current fixture information.';
   const retries=status?`${status}${retained?' Earlier forecast retained.':''}${count}${state.status==='failed'?' Waiting for a scheduled retry.':''}`:`No retry pending.${count}`;
-  const details=forecast?`<details class="agent-details">${probabilityRow}<div class="agent-detail-content"><p>Model: ${escape(forecast.model??'Unavailable')}</p><p>Generated: ${time}</p><p>${freshness}</p><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</div></details>`:`<details class="agent-details">${probabilityRow}<div class="agent-detail-content"><p>${escape(retries)}</p>${state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:''}</div></details>`;
+  const failure=providerFailureMessage(state.failureCode);
+  const failureText=failure?`<p class="forecast-failure">${escape(failure)}</p>`:'';
+  const nextRetry=state.nextAttemptAt?`<p>Next retry: <time datetime="${escape(state.nextAttemptAt)}">${fmt(state.nextAttemptAt,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} London</time></p>`:'';
+  const details=forecast?`<details class="agent-details">${probabilityRow}<div class="agent-detail-content"><p>Model: ${escape(forecast.model??'Unavailable')}</p><p>Generated: ${time}</p><p>${freshness}</p><p>${escape(retries)}</p>${failureText}${nextRetry}</div></details>`:`<details class="agent-details">${probabilityRow}<div class="agent-detail-content"><p>${escape(retries)}</p>${failureText}${nextRetry}</div></details>`;
   const scoreLabel=forecast?`${result}, predicted score ${score}`:'No prediction';
   return `<section class="agent-row" aria-label="${escape(displayName)} forecast"><div class="agent-identity"><strong>${escape(displayName)}</strong><span class="forecast-state ${availability}">${label}</span></div><div class="agent-score" aria-label="${escape(displayName)}: ${escape(scoreLabel)}">${forecast?`<span class="agent-result">${escape(result)}</span><strong>${escape(score)}</strong>`:'<span class="no-forecast">—</span>'}</div>${details}</section>`;
 }
 
 export function renderMatchCard(match){
   const forecasts=match.predictions??{jev:match.prediction};
-  const hasPredictions=AGENTS.some(agent=>forecasts?.[agent.id]);
   const status=fixtureStatus(match);
-  const agentRows=hasPredictions?`<div class="agent-rows">${AGENTS.map(agent=>agentRow(match,agent,forecasts[agent.id],match.forecastStates?.[agent.id])).join('')}</div>`:'';
+  const agentRows=`<div class="agent-rows">${AGENTS.map(agent=>agentRow(match,agent,forecasts[agent.id],match.forecastStates?.[agent.id])).join('')}</div>`;
   return `<article class="card" id="match-${escape(match.id)}" aria-label="${escape(match.home.name)} versus ${escape(match.away.name)}"><div class="card-top"><span class="gw">GAMEWEEK ${escape(match.gameweek??'TBC')}</span><span>${escape(status)}${match.provisional?' · provisional':''}</span></div><div class="teams">${team(match.home)}<div><div class="score waiting">VS</div><div class="score-caption">FIXTURE</div></div>${team(match.away)}</div>${agentRows}</article>`;
 }

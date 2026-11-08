@@ -69,9 +69,9 @@ function fakeStore(matches, updatedAt, snapshots = []) {
     async beginRun(key, scheduledAt) { calls.push(['run', key, scheduledAt]); return run; },
     async getRun() { return {snapshots}; },
     async saveSnapshot(runId, fixtureId, input) { calls.push(['snapshot', fixtureId]); return input; },
-    async claimAttempt({provider}) { calls.push(['claim', provider]); return true; },
+    async claimAttempt({provider}) { calls.push(['claim', provider]); return 1; },
     async savePrediction(entry) { calls.push(['save', entry.provider, entry.completedAt]); return true; },
-    async recordAttempt(entry) { calls.push(['attempt', entry.provider, entry.status]); },
+    async recordAttempt(entry) { calls.push(['attempt', entry.provider, entry.status, entry.error, entry.metadata]); },
   };
 }
 
@@ -109,4 +109,16 @@ test('a provider response completed at kickoff is counted as a failed attempt', 
   const result = await generateWeeklyPredictions(store, {jev: async () => ({})}, now);
   assert.deepEqual(result, {targeted: 1, updated: 0, failed: 1});
   assert.ok(store.calls.some(call => call[0] === 'attempt' && call[2] === 'failed'));
+});
+
+test('provider failures persist a safe diagnostic and log no exception text', async t => {
+  const now='2026-01-07T09:00:00Z';
+  const store=fakeStore([{id:41,kickoff:'2026-01-08T12:00:00Z'}],now);
+  const logged=[];
+  t.mock.method(console,'error',value=>logged.push(JSON.parse(value)));
+  await generateWeeklyPredictions(store,{gemini:async()=>{throw Object.assign(new Error('private response and credential'),{status:429});}},now,async()=>{});
+  const attempt=store.calls.find(call=>call[0]==='attempt');
+  assert.deepEqual(attempt,['attempt','gemini','failed','http_429',{attemptNumber:1,failureCode:'http_429'}]);
+  assert.deepEqual(logged,[{event:'prediction_attempt_failed',fixtureId:41,provider:'gemini',attemptNumber:1,failureCode:'http_429'}]);
+  assert.ok(!JSON.stringify({attempt,logged}).includes('private response'));
 });
