@@ -246,10 +246,10 @@ dbtest('provider claims serialize overlaps, retry failures once, and never recla
   assert.equal(await store.claimAttempt(afterCutoff),false);
 
   const abandoned={...entry,provider:'gpt'};
-  assert.equal(await store.claimAttempt(abandoned),true);
+  assert.equal(await store.claimAttempt(abandoned),1);
   assert.equal(await store.claimAttempt(abandoned),false);
   assert.equal(await store.claimAttempt({...abandoned,attemptAt:'2099-10-07T08:07:00Z'}),false);
-  assert.equal(await store.claimAttempt({...abandoned,attemptAt:'2099-10-07T08:15:00Z'}),true);
+  assert.equal(await store.claimAttempt({...abandoned,attemptAt:'2099-10-07T08:15:00Z'}),2);
 });
 dbtest('daily refresh resolves a final score once and does not revive it with a late prediction',async()=>{
   await store.importSnapshot(baseline());
@@ -663,12 +663,13 @@ dbtest('visitors see retained and missing forecasts after a failed provider refr
   await store.importSnapshot(baseline());
   const refreshed={...match,home:{...home,points:6}};
   await store.refreshFixtures({matches:[refreshed],raw:[],teams,source:'Official Fantasy Premier League',updatedAt:'2026-10-02T08:00:00Z'});
-  await predictFixtures(store,[refreshed],{jev:async()=>{throw new Error('Failure with a private credential');},openai:async()=>{throw new Error('Refused');}},async()=>{});
+  await predictFixtures(store,[refreshed],{jev:async()=>{throw new Error('Failure with a private credential');},openai:async()=>{throw Object.assign(new Error('Refused'),{failureCode:'provider_refusal'});}},async()=>{});
   const live=(await response(fixturesHandler)).matches[0];
   assert.equal(live.forecastStates.jev.availability,'retained');
   assert.equal(live.forecastStates.jev.status,'failed');
   assert.equal(live.forecastStates.openai.availability,'missing');
   assert.equal(live.forecastStates.openai.status,'failed');
+  assert.equal(live.forecastStates.openai.failureCode,'provider_refusal');
   assert.equal(live.predictions.jev.generatedAt,prediction.generatedAt);
   assert.equal(live.predictions.openai,undefined);
   assert.match(forecastPanel(live,'jev',live.predictions.jev,live.forecastStates.jev),/Refresh failed.*Retaining the earlier forecast/);
@@ -785,9 +786,9 @@ dbtest('a recovered claim rejects the abandoned worker result and failure',async
   const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z','2099-10-07T08:00:00Z');
   await store.saveSnapshot(run.id,match.id,match);
   const first={runId:run.id,fixtureId:match.id,provider:'openai',claimUntil:'2099-10-08T08:00:00Z',attemptAt:'2099-10-07T08:00:00Z',claimToken:randomUUID(),matchSignature:JSON.stringify(match),prediction};
-  assert.equal(await store.claimAttempt(first),true);
+  assert.equal(await store.claimAttempt(first),1);
   const replacement={...first,attemptAt:'2099-10-07T08:15:00Z',claimToken:randomUUID(),prediction:{...prediction,score:[3,0]}};
-  assert.equal(await store.claimAttempt(replacement),true);
+  assert.equal(await store.claimAttempt(replacement),2);
   assert.equal(await store.savePrediction(first),false);
   await store.recordAttempt({...first,status:'failed',error:'Late abandoned failure'});
   assert.equal((await store.getRun(run.id)).attempts[0].status,'started');
@@ -817,13 +818,13 @@ dbtest('an additive retry upgrade preserves old forecasts and does not reset new
   const run=await store.beginRun('weekly:2099-10-07T08:00:00.000Z','2099-10-07T08:00:00Z');
   await store.saveSnapshot(run.id,match.id,match);
   const entry={runId:run.id,fixtureId:match.id,provider:'openai',claimUntil:'2099-10-08T08:00:00Z',attemptAt:'2099-10-07T08:00:00Z',claimToken:randomUUID()};
-  assert.equal(await store.claimAttempt(entry),true);
+  assert.equal(await store.claimAttempt(entry),1);
   await store.recordAttempt({...entry,status:'failed'});
   await store.upgradeRetries();
   assert.equal((await store.getRun(run.id)).attempts[0].status,'failed');
   assert.equal((await store.getRun(run.id)).attempts[0].attemptCount,1);
   assert.equal(await store.claimAttempt({...entry,attemptAt:'2099-10-07T08:14:59Z'}),false);
-  assert.equal(await store.claimAttempt({...entry,attemptAt:'2099-10-07T08:15:00Z',claimToken:randomUUID()}),true);
+  assert.equal(await store.claimAttempt({...entry,attemptAt:'2099-10-07T08:15:00Z',claimToken:randomUUID()}),2);
   assert.equal((await store.getRun(run.id)).attempts[0].attemptCount,2);
 });
 
