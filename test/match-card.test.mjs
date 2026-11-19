@@ -16,7 +16,7 @@ const match = {
   forecastStates: {
     jev:{availability:'fresh',status:'complete'},
     openai:{availability:'retained',status:'failed',attemptCount:2,nextAttemptAt:'2026-10-24T08:00:00Z'},
-    claude:{availability:'missing',status:'exhausted',attemptCount:3},
+    claude:{availability:'missing',status:'exhausted',attemptCount:3,failureCode:'http_429'},
     gemini:{availability:'missing',status:'started',attemptCount:1},
   },
 };
@@ -40,6 +40,7 @@ test('a match card lists each agent once and puts probabilities on the accessibl
   assert.match(html,/gpt-6-luna/);
   assert.match(html,/2026-10-23T09:01:00Z/);
   assert.match(html,/Retries exhausted/);
+  assert.match(html,/Provider returned HTTP 429/);
   assert.match(html,/Attempt 2 of 3/);
   assert.match(html,/No prediction/);
   assert.match(html,/Refresh in progress/);
@@ -55,6 +56,12 @@ test('missing agents stay visible without an invented forecast',()=>{
   assert.equal((html.match(/class="agent-row"/g)||[]).length,5);
   assert.equal((html.match(/class="forecast-state missing">No prediction<\/span>/g)||[]).length,5);
   assert.doesNotMatch(html,/predicted score/i);
+});
+
+test('safe failure reasons appear on a missing forecast and private text never does',()=>{
+  const html=renderMatchCard({...match,forecastStates:{gemini:{availability:'missing',status:'exhausted',failureCode:'timeout',error:'private token <script>'}}});
+  assert.match(html,/Provider request timed out/);
+  assert.doesNotMatch(html,/private token|<script>/);
 });
 
 test('fixture rescheduling remains visible in the match header',()=>{
